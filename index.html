@@ -194,8 +194,13 @@
           <h2>Kanten-Editor <span id="planmeta" style="font-family:var(--mono);font-size:11px;color:#999;text-transform:none;letter-spacing:0"></span></h2>
           <div class="palette" id="palette"></div>
           <div class="editorhint" id="editorhint"></div>
-          <div class="preview">
+          <div class="preview" style="position:relative">
             <canvas id="plan" width="900" height="560"></canvas>
+            <div class="zoomctl" style="position:absolute;right:10px;bottom:10px;display:flex;flex-direction:column;gap:4px">
+              <button id="zoomin"  title="Vergrössern"  style="width:30px;height:30px;font-size:18px;line-height:1;border:1px solid var(--line);background:#fff;border-radius:6px;cursor:pointer">+</button>
+              <button id="zoomout" title="Verkleinern"  style="width:30px;height:30px;font-size:18px;line-height:1;border:1px solid var(--line);background:#fff;border-radius:6px;cursor:pointer">−</button>
+              <button id="zoomfit" title="Einpassen"    style="width:30px;height:30px;font-size:12px;line-height:1;border:1px solid var(--line);background:#fff;border-radius:6px;cursor:pointer">⤢</button>
+            </div>
           </div>
           <div class="legend">
             <span><i style="background:var(--blue)"></i>Module</span>
@@ -357,7 +362,7 @@ window.__parseDXF=parseDXF;
 'use strict';
 
 const S = {
-  raw:null, mods:[], carriers:[], barred:[], env:[], buildings:[],
+  raw:null, mods:[], carriers:[], barred:[], env:[], buildings:[], roofs:[],
   layers:{},
   edgeCands:[],        // {id,a,b,len,interior,assigned:null|type}
   assign:{},           // id -> type  (First/Traufe/Ort/Grat/Kehle/Schneefang)
@@ -487,6 +492,13 @@ function edgeLengthsByBuilding(){
   if(!anyAssigned && S.preset && S.preset.length){
     S.preset.forEach(p=>add(p.a,p.b,p.len,p.type));
   }
+  // auto First from SPT roof ridge lines (DWG): add unless user already marked First on that face
+  if(S.roofs && S.roofs.length){
+    const userFirst = S.edgeCands.some(e=>S.assign[e.id]==='First') || S.drawnEdges.some(e=>e.type==='First');
+    if(!userFirst){
+      S.roofs.forEach(r=>{ if(r.ridge && !r.firstOff){ const len=H(r.ridge[0],r.ridge[1]); add(r.ridge[0],r.ridge[1],len,'First'); } });
+    }
+  }
   return out;
 }
 
@@ -550,19 +562,37 @@ function compute(){
     }
   });
 
-  group('Firstausbildung (Aura 2-Firstplatte 2770 + Firstprofil)');
-  const rFP=row('5.1','Aura 2-Firstplatte Solar 2770×300 (beidseitig)','Stk');
-  const rFPr=row('5.2','Firstprofil Aluminium schwarz eloxiert 2770','Stk');
+  group('Firstausbildung (Aura 2-Firstplatte, adaptiv 2770/1940)');
+  const rFP=row('5.1','Aura 2-Firstplatte 2770×300 (beidseitig)','Stk');
+  const rFP19=row('5.1b','Aura 2-Firstplatte 1940×300 (beidseitig)','Stk');
+  const rFPr=row('5.2','Firstprofil Aluminium 2770','Stk');
+  const rFPr19=row('5.2b','Firstprofil Aluminium 1940','Stk');
   const rFS=row('5.3','Schrauben Firstplatte T30 6.5×65 (6 pro Platte)','Stk');
   const rFN=row('5.4','Niet 4.0×19 K9 schwarz','Stk');
   const rFAB=row('5.5','Firstanschlussblech gelocht 2770 (beidseitig)','Stk');
+  const rFAB19=row('5.5b','Firstanschlussblech gelocht 1940 (beidseitig)','Stk');
   const rFMH=row('5.6','Modulhaken für Firstanschlussblech','Stk');
   const rFFB=row('5.7','Firstfugenblech Alu gerippt 200×310×310','Stk');
   const rFAF=row('5.8','Fugenblech zu Firstanschlussblech 250×185','Stk');
+  // tile a ridge length with 2770 then 1940 components (adaptive to layout)
+  function tileFirst(L){
+    let rem=L, n27=0, n19=0;
+    n27=Math.floor(rem/2.77); rem-=n27*2.77;
+    if(rem>0.001){ if(rem<=1.94){ n19=1; } else { n27+=1; } } // leftover: one 1940 if it fits, else round up a 2770
+    return {n27,n19};
+  }
   S.buildings.forEach(b=>{
-    const PB=2.77;let one=0,fug=0;edges[b.name].firstLines.forEach(L=>{const n=Math.ceil(L/PB);one+=n;fug+=Math.max(n-2,0);});
-    rFP.perB[b.name]=one*2;rFPr.perB[b.name]=one;rFS.perB[b.name]=one*2*6;rFN.perB[b.name]=one;
-    rFAB.perB[b.name]=one*2;rFMH.perB[b.name]=one*2*6;rFFB.perB[b.name]=fug;rFAF.perB[b.name]=fug*2;
+    let n27=0,n19=0,fug=0;
+    edges[b.name].firstLines.forEach(L=>{
+      const t=tileFirst(L); n27+=t.n27; n19+=t.n19;
+      const n=t.n27+t.n19; fug+=Math.max(n-2,0); // joints between segments per ridge
+    });
+    const nAll=n27+n19;
+    rFP.perB[b.name]=n27*2;   rFP19.perB[b.name]=n19*2;
+    rFPr.perB[b.name]=n27;    rFPr19.perB[b.name]=n19;
+    rFS.perB[b.name]=nAll*2*6; rFN.perB[b.name]=nAll;
+    rFAB.perB[b.name]=n27*2;  rFAB19.perB[b.name]=n19*2;
+    rFMH.perB[b.name]=nAll*2*6; rFFB.perB[b.name]=fug; rFAF.perB[b.name]=fug*2;
   });
 
   group('Grat / Kehle');
@@ -578,13 +608,28 @@ function compute(){
 
   if(p.schneefang){
     group('Schneefang');
-    const typ=p.neigung<=24?'2-Rohr':'3-Rohr';
-    const rST=row('8.1','Schneefangstütze abgekröpft '+typ+' ½" Chromstahl','Stk');
+    const rST2=row('8.1','Schneefangstütze abgekröpft 2-Rohr ½" Chromstahl','Stk');
+    const rST3=row('8.1b','Schneefangstütze abgekröpft 3-Rohr ½" Chromstahl','Stk');
     const rSS=row('8.2','Senkkopfschraube T40 8.0×80','Stk');
     const rSPA=row('8.3','Plattenauflager unter Schneefangstütze','Stk');
     const rSR=row('8.4','Schneefangrohr ½" Länge 6000','Stk');
     const kl=p.h0<=1200?0.65:(p.h0<=1400?0.60:0.55);
-    S.buildings.forEach(b=>{const len=edges[b.name].Schneefang;const st=len>0?Math.ceil(len/kl):0;rST.perB[b.name]=st;rSS.perB[b.name]=st*4;rSPA.perB[b.name]=st;rSR.perB[b.name]=len>0?Math.ceil(len/6):0;});
+    // effective pitch per building: from SPT roof faces if available, else global
+    function pitchForBuilding(bname){
+      if(S.roofs && S.roofs.length){
+        // roofs near this building's modules
+        const bm=S.buildings.find(x=>x.name===bname);
+        if(bm){const cands=S.roofs.filter(r=>{const c=centroid(r.verts);return nearestBuilding(c)===bname;});
+          if(cands.length){const eff=cands.map(r=>r.pitchUser!=null?r.pitchUser:r.pitch);return eff.reduce((a,v)=>a+v,0)/eff.length;}}
+      }
+      return p.neigung;
+    }
+    S.buildings.forEach(b=>{
+      const len=edges[b.name].Schneefang;const st=len>0?Math.ceil(len/kl):0;
+      const pit=pitchForBuilding(b.name);
+      if(pit<=24) rST2.perB[b.name]=st; else rST3.perB[b.name]=st;
+      rSS.perB[b.name]=st*4;rSPA.perB[b.name]=st;rSR.perB[b.name]=len>0?Math.ceil(len/6):0;
+    });
   }
 
   rows.forEach(r=>{if(r.group)return;let t=B.reduce((a,n)=>a+(r.perB[n]||0),0);r.total=(r.unit==='lfm'||r.unit==='m²')?Math.round(t*10)/10:t;});
@@ -632,6 +677,8 @@ function onParsed(resolved){
   S.env=(byL['ENVIRONMENT']||[]).map(e=>e.verts);
   // SPT pre-placed aura plates (from DWG); empty for PV*Sol DXF
   S.sptAura = (window.__SPT_AURA||[]).slice();
+  // SPT roof faces with auto pitch + ridge line (from 3D RoofArea)
+  S.roofs = (window.__SPT_ROOFS||[]).map((r,i)=>({verts:r.verts, pitch:r.pitch, ridge:r.ridge, idx:i, pitchUser:null}));
   // SPT snowguard markers -> preset Schneefang points
   S.sptSnow = (byL['__SNOWGUARD__']||[]).map(e=>e.verts[0]);
   S.buildings=clusterBuildings(S.mods);
@@ -654,7 +701,7 @@ const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
 const el=(t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e;};
 const A=()=>window.__SUN,St=()=>window.__SUN.S,ET=()=>window.__SUN.EDGE_TYPES;
 
-let VIEW={x0:0,y0:0,scale:1,W:900,H:560,pad:24}; // canvas transform
+let VIEW={x0:0,y0:0,scale:1,baseScale:1,zoom:1,panx:0,pany:0,W:900,H:560,pad:24}; // canvas transform
 let drawStart=null; // free-draw first point (world)
 
 /* ---- step ---- */
@@ -706,7 +753,12 @@ function edgeSummary(){const L=St().layers,h=[];['First','Seitenanschlussprofil'
 function buildParams(){
   const p=St().params,box=$('#params');box.innerHTML='';
   box.appendChild(field('Bezugshöhe H₀','m ü. M.',selNum('h0',[[1000,'≤ 1000 m'],[1200,'≤ 1200 m'],[1400,'≤ 1400 m'],[1600,'≤ 1600 m'],[2000,'≤ 2000 m']],p.h0),p.h0>1400?'Über 1400 m: Aura nur mit Freigabe TS; XL ab 1600 m nicht zulässig.':'Modulhalter, Plattenauflager, Aura-Zulässigkeit.'));
-  box.appendChild(field('Dachneigung','grad',numIn('neigung',p.neigung,1,60),'Schneefang-Stützentyp (2-Rohr 10–24°, 3-Rohr 25–45°).'));
+  const S0=St();
+  if(S0.roofs && S0.roofs.length){
+    box.appendChild(roofPitchPanel(S0.roofs));
+  } else {
+    box.appendChild(field('Dachneigung','grad',numIn('neigung',p.neigung,1,60),'Schneefang-Stützentyp (2-Rohr 10–24°, 3-Rohr 25–45°).'));
+  }
   box.appendChild(field('Ort-Ausbildung',null,selStr('ortVariante',[['seitenanschluss','Seitenanschlussprofil'],['ueberstehend','Ort überstehend'],['rinne','Ortrinne'],['keiner','Kein Ortprofil']],p.ortVariante),'Nur „Seitenanschlussprofil" erzeugt Ortprofile.'));
   box.appendChild(field('First-Variante',null,selStr('firstVariante',[['standard','Standard'],['variabel','Variable Entlüftung'],['aura','First an Aura 2'],['strackort','Strackort']],p.firstVariante),'Komponentenbreite 2770.'));
   box.appendChild(tog('auraGlobal','Aura 2-Restfläche füllen',p.auraGlobal,'Restfläche der Dachflächen wird mit Aura-Platten aufgefüllt. Aus bei Fremdeindeckung.'));
@@ -714,6 +766,27 @@ function buildParams(){
   box.querySelectorAll('select,input').forEach(inp=>inp.addEventListener('change',()=>{const k=inp.dataset.k;if(inp.type==='checkbox')p[k]=inp.checked;else if(inp.type==='number')p[k]=parseFloat(inp.value)||0;else p[k]=isNaN(+inp.value)?inp.value:+inp.value;buildParams();A().compute();renderAll();}));
 }
 function field(l,m,c,h){const f=el('div','field');f.appendChild(el('label','lab',l+(m?` <span class="meta">${m}</span>`:'')));f.appendChild(c);if(h)f.appendChild(el('div','help',h));return f;}
+function roofPitchPanel(roofs){
+  const f=el('div','field');
+  f.appendChild(el('label','lab','Dachneigung je Fläche <span class="meta">grad</span>'));
+  const wrap=el('div');wrap.style.cssText='display:flex;flex-direction:column;gap:5px';
+  roofs.forEach((r,i)=>{
+    const eff = r.pitchUser!=null ? r.pitchUser : r.pitch;
+    const typ = eff<=24?'2-Rohr':'3-Rohr';
+    const rowEl=el('div');rowEl.style.cssText='display:flex;align-items:center;gap:8px;font-size:12px';
+    const lbl=el('span',null,`Fläche ${i+1}`);lbl.style.cssText='width:62px;color:#555;font-family:var(--mono)';
+    const inp=el('input');inp.type='number';inp.min=5;inp.max=60;inp.value=eff;inp.style.cssText='width:60px';
+    inp.dataset.roof=i;
+    const auto=el('span',null,`auto ${r.pitch}°`);auto.style.cssText='color:#999;font-size:11px';
+    const tg=el('span',null,typ);tg.style.cssText='font-size:11px;color:'+(eff<=24?'#1b7':'#c83')+';font-family:var(--mono)';
+    inp.addEventListener('change',()=>{const v=parseFloat(inp.value);roofs[i].pitchUser=isNaN(v)?null:v;buildParams();A().compute();renderAll();});
+    rowEl.appendChild(lbl);rowEl.appendChild(inp);rowEl.appendChild(auto);rowEl.appendChild(tg);
+    wrap.appendChild(rowEl);
+  });
+  f.appendChild(wrap);
+  f.appendChild(el('div','help','Automatisch aus 3D-Geometrie erkannt. Überschreibbar. Bestimmt Schneefang-Typ je Fläche (2-Rohr 10–24°, 3-Rohr 25–45°).'));
+  return f;
+}
 function selNum(k,o,v){const s=el('select');s.dataset.k=k;o.forEach(([val,t])=>{const op=el('option',null,t);op.value=val;if(+val===+v)op.selected=true;s.appendChild(op);});return s;}
 function selStr(k,o,v){const s=el('select');s.dataset.k=k;o.forEach(([val,t])=>{const op=el('option',null,t);op.value=val;if(val===v)op.selected=true;s.appendChild(op);});return s;}
 function numIn(k,v,mn,mx){const i=el('input');i.type='number';i.dataset.k=k;i.value=v;i.min=mn;i.max=mx;return i;}
@@ -759,10 +832,15 @@ function computeView(){
   const allV=[...mods.map(m=>m.v),...S.carriers,...S.env];
   let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;allV.forEach(v=>v.forEach(([x,y])=>{minx=Math.min(minx,x);miny=Math.min(miny,y);maxx=Math.max(maxx,x);maxy=Math.max(maxy,y);}));
   const pad=VIEW.pad,s=Math.min((cw-2*pad)/(maxx-minx||1),(ch-2*pad)/(maxy-miny||1));
-  VIEW.x0=minx;VIEW.y0=miny;VIEW.scale=s;VIEW.maxy=maxy;
+  VIEW.x0=minx;VIEW.y0=miny;VIEW.baseScale=s;VIEW.scale=s*(VIEW.zoom||1);VIEW.maxy=maxy;
+  VIEW.cx=(minx+maxx)/2;VIEW.cy=(miny+maxy)/2;
 }
-function W2S(x,y){return [VIEW.pad+(x-VIEW.x0)*VIEW.scale, VIEW.H-VIEW.pad-(y-VIEW.y0)*VIEW.scale];}
-function S2W(sx,sy){return [(sx-VIEW.pad)/VIEW.scale+VIEW.x0, (VIEW.H-VIEW.pad-sy)/VIEW.scale+VIEW.y0];}
+// World->screen with zoom around center + pan offset
+function W2S(x,y){const z=VIEW.zoom||1;const sx=VIEW.pad+(x-VIEW.x0)*VIEW.baseScale;const sy=VIEW.H-VIEW.pad-(y-VIEW.y0)*VIEW.baseScale;
+  // zoom around canvas center, then pan
+  return [ (sx-VIEW.W/2)*z+VIEW.W/2+(VIEW.panx||0), (sy-VIEW.H/2)*z+VIEW.H/2+(VIEW.pany||0) ];}
+function S2W(px,py){const z=VIEW.zoom||1;const sx=(px-(VIEW.panx||0)-VIEW.W/2)/z+VIEW.W/2;const sy=(py-(VIEW.pany||0)-VIEW.H/2)/z+VIEW.H/2;
+  return [ (sx-VIEW.pad)/VIEW.baseScale+VIEW.x0, (VIEW.H-VIEW.pad-sy)/VIEW.baseScale+VIEW.y0 ];}
 
 function drawPlan(){
   const S=St(),cv=$('#plan'),ctx=cv.getContext('2d');const dpr=window.devicePixelRatio||1;
@@ -772,6 +850,8 @@ function drawPlan(){
   const poly=(v,st,fl,w,dash)=>{ctx.beginPath();v.forEach((p,i)=>{const[X,Y]=W2S(p[0],p[1]);i?ctx.lineTo(X,Y):ctx.moveTo(X,Y);});if(fl){ctx.fillStyle=fl;ctx.fill();}if(st){ctx.setLineDash(dash||[]);ctx.strokeStyle=st;ctx.lineWidth=w||1;ctx.stroke();ctx.setLineDash([]);}};
   // roof planes (carriers) — outline + faint fill = Dachumriss
   S.carriers.forEach(v=>poly(v,'#c9a26b','rgba(214,170,110,.10)',1));
+  // auto-detected ridge (First) lines from SPT roof faces — red dashed
+  (S.roofs||[]).forEach(r=>{ if(r.ridge) poly([r.ridge[0],r.ridge[1]],'#c0392b',null,2,[7,4]); });
   // env outline
   S.env.forEach(v=>poly(v,'#999',null,1,[4,3]));
   // barred
@@ -805,8 +885,34 @@ function nearestCandidate(sx,sy){
 function ptSeg(px,py,ax,ay,bx,by){const dx=bx-ax,dy=by-ay,l2=dx*dx+dy*dy;let t=l2?((px-ax)*dx+(py-ay)*dy)/l2:0;t=Math.max(0,Math.min(1,t));const cx=ax+t*dx,cy=ay+t*dy;return Math.hypot(px-cx,py-cy);}
 function setupCanvas(){
   const cv=$('#plan');
+  let dragging=false, dragMoved=false, lastX=0, lastY=0;
+  // wheel zoom toward cursor
+  cv.addEventListener('wheel',ev=>{
+    ev.preventDefault();
+    const [px,py]=canvasXY(ev);
+    const before=S2W(px,py);
+    const factor=ev.deltaY<0?1.12:1/1.12;
+    VIEW.zoom=Math.max(1,Math.min(40,(VIEW.zoom||1)*factor));
+    drawPlan();
+    const after=S2W(px,py);
+    // adjust pan so the world point under cursor stays fixed
+    const a=W2S(before[0],before[1]);
+    VIEW.panx += px-a[0]; VIEW.pany += py-a[1];
+    drawPlan();
+  },{passive:false});
+  // drag to pan
+  cv.addEventListener('mousedown',ev=>{dragging=true;dragMoved=false;const[x,y]=canvasXY(ev);lastX=x;lastY=y;});
+  window.addEventListener('mouseup',()=>{dragging=false;});
+  cv.addEventListener('mousemove',ev=>{
+    const S=St();const[sx,sy]=canvasXY(ev);
+    if(dragging){const dx=sx-lastX,dy=sy-lastY;if(Math.abs(dx)+Math.abs(dy)>2)dragMoved=true;VIEW.panx+=dx;VIEW.pany+=dy;lastX=sx;lastY=sy;drawPlan();cv.style.cursor='grabbing';return;}
+    if(!S.activeTool){cv.style.cursor='grab';return;}
+    if(S.activeTool==='__draw'){cv.style.cursor='crosshair';return;}
+    cv.style.cursor=nearestCandidate(sx,sy)?'pointer':'grab';
+  });
   cv.addEventListener('click',ev=>{
-    const S=St();if(!S.activeTool)return;
+    const S=St();if(dragMoved){dragMoved=false;return;} // ignore clicks that were drags
+    if(!S.activeTool)return;
     const[sx,sy]=canvasXY(ev);
     if(S.activeTool==='__draw'){
       const w=S2W(sx,sy);
@@ -817,7 +923,11 @@ function setupCanvas(){
     const e=nearestCandidate(sx,sy);
     if(e){ if(S.assign[e.id]===S.activeTool) delete S.assign[e.id]; else S.assign[e.id]=S.activeTool; A().compute();renderAll(); }
   });
-  cv.addEventListener('mousemove',ev=>{const S=St();if(!S.activeTool||S.activeTool==='__draw'){cv.style.cursor=S.activeTool==='__draw'?'crosshair':'default';return;}const[sx,sy]=canvasXY(ev);cv.style.cursor=nearestCandidate(sx,sy)?'pointer':'default';});
+  // zoom buttons
+  const zin=$('#zoomin'),zout=$('#zoomout'),zfit=$('#zoomfit');
+  if(zin)zin.onclick=()=>{VIEW.zoom=Math.min(40,(VIEW.zoom||1)*1.3);drawPlan();};
+  if(zout)zout.onclick=()=>{VIEW.zoom=Math.max(1,(VIEW.zoom||1)/1.3);drawPlan();};
+  if(zfit)zfit.onclick=()=>{VIEW.zoom=1;VIEW.panx=0;VIEW.pany=0;drawPlan();};
 }
 
 /* ---- stats ---- */
