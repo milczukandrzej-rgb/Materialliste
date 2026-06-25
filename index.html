@@ -505,7 +505,7 @@ function auraForBuilding(b){
   //     then fill each sub-segment with the standard plate matching its width (remainder cut,
   //     >=400mm). Fuge = vertical joint between two filled tiles; the open roof edge (Ort) is
   //     a Seitenanschlussprofil, not a Fuge.
-  const STEP=0.02, EDGE=0.12, SNAP=0.06;
+  const STEP=0.02, EDGE=0.12, SNAP=0.08;
   let plates=0, fug=0; const byWidth={1380:0,1940:0,2770:0,cut:0}; const cutWidths=[];
   const inv=([x,y])=>[x*cc+y*ss, -x*ss+y*cc]; // rotated frame -> world
   const plateRects=[]; // {verts:[world...], w, kind}
@@ -513,37 +513,59 @@ function auraForBuilding(b){
   function isMod(x,y){return modR.some(m=>pointInPoly([x,y],m));}
   function isBar(x,y){return barR.some(z=>pointInPoly([x,y],z));}
   function freeAt(x,y){return onRoof(x,y)&&!isMod(x,y)&&!isBar(x,y);}
-  // vertical module edges (left/right x of each module in rotated frame) = column grid
+
+  // --- module raster anchors (rotated frame) ---
+  // vertical column edges (left/right x of each module)
   const colEdges=[];
   modR.forEach(m=>{let mnx=1e9,mxx=-1e9;m.forEach(([x])=>{mnx=Math.min(mnx,x);mxx=Math.max(mxx,x);});colEdges.push(mnx,mxx);});
   colEdges.sort((a,b)=>a-b);
-  // dedupe near-equal edges
   const grid=[];colEdges.forEach(e=>{if(!grid.length||Math.abs(e-grid[grid.length-1])>SNAP)grid.push(e);});
-  function classify(pw){ // nearest standard width if close, else 'cut'
-    for(const s of [1.38,1.94,2.77]) if(Math.abs(pw-s)<=0.05) return {pw:s,kind:s===2.77?'2770':s===1.94?'1940':'1380'};
-    return null;
-  }
-  function place(cx,yb,pw,run,nRef){
-    const cl=classify(pw); let kind,wReal=pw;
-    if(cl){ kind=cl.kind; wReal=cl.pw; byWidth[kind==='2770'?2770:kind==='1940'?1940:1380]++; }
-    else { // not a standard width: try to fill with a standard <= pw, leaving a cut remainder
-      const std=[2.77,1.94,1.38].find(s=>s<=pw-0.40+1e-6); // leave >=400 for a second piece
-      if(std){ // place standard, recurse remainder
-        place(cx,yb,std,run,nRef); place(cx+std+GAP,yb,pw-std-GAP,run,nRef); return;
+  // horizontal row band bottoms (module bottom y), deduped to ROW pitch
+  const rowBottoms=[];
+  modR.forEach(m=>{let mny=1e9;m.forEach(([,y])=>{mny=Math.min(mny,y);});rowBottoms.push(mny);});
+  rowBottoms.sort((a,b)=>a-b);
+  const rowAnchors=[];rowBottoms.forEach(y=>{if(!rowAnchors.length||Math.abs(y-rowAnchors[rowAnchors.length-1])>0.30)rowAnchors.push(y);});
+  // build full row grid: extend module row anchors downward/upward by ROW to cover whole roof
+  let modTop=-1e9, modBot=1e9; modR.forEach(m=>m.forEach(([,y])=>{modTop=Math.max(modTop,y);modBot=Math.min(modBot,y);}));
+  if(modTop===-1e9){modTop=y1;modBot=y0;}
+  const anchor=rowAnchors.length?rowAnchors[0]:y0; // a real module row bottom
+  // rows: start at anchor, go down to y0 and up to modTop, all on the ROW pitch from the anchor
+  const rowYs=[];
+  for(let y=anchor; y>=y0-ROW; y-=ROW) rowYs.unshift(y);
+  for(let y=anchor+ROW; y<=modTop+0.02; y+=ROW) rowYs.push(y);
+
+  function classify(w){ for(const s of [1.38,1.94,2.77]) if(Math.abs(w-s)<=0.06) return {w:s,kind:s===2.77?'2770':s===1.94?'1940':'1380'}; return null; }
+  // fill a single free segment [a,bb] at row bottom yb, snapping joints to the module column grid
+  function fillSegment(a,bb,yb,nRef){
+    let cx=a; let guard=0;
+    while(bb-cx>=MINW && guard++<50){
+      const w=bb-cx;
+      const cl=classify(w);
+      if(cl && w<=2.77+0.06){ // whole remaining segment is ~a standard plate
+        byWidth[cl.kind==='2770'?2770:cl.kind==='1940'?1940:1380]++;
+        plateRects.push({verts:[[cx,yb],[cx+cl.w,yb],[cx+cl.w,yb+PH],[cx,yb+PH]].map(inv),w:Math.round(cl.w*1000),kind:cl.kind});
+        cx+=cl.w+GAP; plates++; nRef.n++; continue;
       }
-      kind='cut'; byWidth.cut++; cutWidths.push(Math.round(pw*1000));
+      // choose the largest standard that leaves either 0 or >=MINW remainder
+      let chosen=null;
+      for(const s of [2.77,1.94,1.38]){ if(s<=w+0.06){ const rem=w-s; if(rem<=0.06||rem>=MINW){chosen=s;break;} } }
+      if(chosen==null) chosen=[2.77,1.94,1.38].find(s=>s<=w+0.06)||null;
+      if(chosen!=null){
+        const k=chosen===2.77?'2770':chosen===1.94?'1940':'1380';byWidth[chosen===2.77?2770:chosen===1.94?1940:1380]++;
+        plateRects.push({verts:[[cx,yb],[cx+chosen,yb],[cx+chosen,yb+PH],[cx,yb+PH]].map(inv),w:Math.round(chosen*1000),kind:k});
+        cx+=chosen+GAP; plates++; nRef.n++;
+      } else { // remainder smaller than smallest plate -> cut plate
+        byWidth.cut++; cutWidths.push(Math.round(w*1000));
+        plateRects.push({verts:[[cx,yb],[cx+w,yb],[cx+w,yb+PH],[cx,yb+PH]].map(inv),w:Math.round(w*1000),kind:'cut'});
+        cx=bb; plates++; nRef.n++;
+      }
     }
-    const r=[[cx,yb],[cx+wReal,yb],[cx+wReal,yb+PH],[cx,yb+PH]].map(inv);
-    plateRects.push({verts:r,w:Math.round(wReal*1000),kind});
-    plates++; nRef.n++;
+    // leftover < MINW that is still >0: a thin cut plate only if >= MINW (else dropped as <400 strip)
   }
-  // upper limit: Aura does not go above the topmost module edge — the strip between the
-  // highest module and the ridge is Firstausbildung (Firstplatte/Anschlussblech), not Aura.
-  let modTop=-1e9; modR.forEach(m=>m.forEach(([,y])=>{modTop=Math.max(modTop,y);}));
-  if(modTop===-1e9) modTop=y1;
-  for(let yb=y0; yb<y1; yb+=ROW){
+  rowYs.forEach(yb=>{
     const yc=yb+PH/2;
-    if(yb+PH > modTop+0.05) continue; // skip rows reaching above the module band (First strip)
+    if(yb+PH > modTop+0.05) return; // never above module band (First strip stays free)
+    // free runs along this row centre
     const runs=[]; let cur=null;
     for(let x=x0; x<=x1; x+=STEP){
       if(freeAt(x,yc)){ if(!cur)cur=[x,x]; else cur[1]=x; }
@@ -551,24 +573,30 @@ function auraForBuilding(b){
     }
     if(cur)runs.push(cur);
     runs.forEach(run=>{
-      let rw=run[1]-run[0]; if(rw<MINW) return;
+      if(run[1]-run[0]<MINW) return;
       const leftMod  = isMod(run[0]-EDGE, yc);
       const rightMod = isMod(run[1]+EDGE, yc);
-      // cut points = module column edges strictly inside this run (snap the run to the grid)
+      // split the run at module column edges that fall inside it -> aura joints align with modules
       const cuts=grid.filter(g=>g>run[0]+MINW*0.5 && g<run[1]-MINW*0.5);
-      const segs=[]; let prev=run[0];
-      cuts.forEach(g=>{ if(g-prev>=MINW){ segs.push([prev,g]); prev=g; } });
+      let segs=[]; let prev=run[0];
+      cuts.forEach(g=>{ segs.push([prev,g]); prev=g; });
       segs.push([prev,run[1]]);
+      // merge thin segments (<0.95m, i.e. would force a small offcut) into a neighbour so a
+      // single wider plate spans the obstacle edge — matches PV*Sol's wider cuts near Störflächen
+      for(let i=0;i<segs.length;i++){
+        const wdt=segs[i][1]-segs[i][0];
+        if(wdt<0.95 && segs.length>1){
+          if(i<segs.length-1){ segs[i+1][0]=segs[i][0]; segs.splice(i,1); i--; }
+          else { segs[i-1][1]=segs[i][1]; segs.splice(i,1); i--; }
+        }
+      }
       const nRef={n:0};
-      segs.forEach(([a,bb])=>{ let w=bb-a; if(w<MINW) return;
-        // fill this column-segment: usually one plate of the column width; if wider, split
-        place(a,yb,w,run,nRef);
-      });
+      segs.forEach(([a,bb])=>{ if(bb-a>=MINW) fillSegment(a,bb,yb,nRef); });
       fug += Math.max(nRef.n-1,0);
       if(leftMod)  fug++;
       if(rightMod) fug++;
     });
-  }
+  });
   return {m2:Math.round(m2*10)/10, plates, byWidth, auraFugen:fug, plateRects, cutWidths};
 }
 
