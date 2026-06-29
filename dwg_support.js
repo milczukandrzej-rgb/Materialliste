@@ -146,8 +146,24 @@ function mapSPT(entities){
       continue;
     }
     if(lay==='SnowGuard' && e.type==='INSERT'){
-      const w=ocsToWorld(e.insertionPoint||{x:0,y:0,z:0}, e.extrusionDirection);
-      out.push({layer:'__SNOWGUARD__', verts:[[w[0]/1000,w[1]/1000],[w[0]/1000,w[1]/1000]], name:e.name});
+      const nm=e.name||'';
+      // SnowGuardModuleSize entries are the (reduced-height) Aura plates that sit under the
+      // snow-guard supports at the eaves. Their size is encoded in the name "Min: x1,y1, max: x2,y2".
+      const ms=nm.match(/Min:\s*(-?[\d.]+),\s*(-?[\d.]+),\s*max:\s*(-?[\d.]+),\s*(-?[\d.]+)/i);
+      if(/SnowGuardModuleSize/i.test(nm) && ms){
+        const wmm=Math.abs(parseFloat(ms[3])-parseFloat(ms[1]));
+        const hmm=Math.abs(parseFloat(ms[4])-parseFloat(ms[2]));
+        if(wmm>=200 && hmm>=200){
+          const verts=insertRectWorld(e,wmm,hmm);
+          // dedupe: skip if a normal aura plate already covers this spot (centroid within 0.3m)
+          let cx=0,cy=0;verts.forEach(p=>{cx+=p[0];cy+=p[1];});cx/=verts.length;cy/=verts.length;
+          const dup=auraPlates.some(a=>{let ax=0,ay=0;a.verts.forEach(p=>{ax+=p[0];ay+=p[1];});ax/=a.verts.length;ay/=a.verts.length;return Math.hypot(ax-cx,ay-cy)<0.30;});
+          if(!dup) auraPlates.push({widthMM:Math.round(wmm), heightMM:Math.round(hmm), verts, snowGuard:true});
+        }
+      } else if(/SchneeHalter/i.test(nm)) {
+        const w=ocsToWorld(e.insertionPoint||{x:0,y:0,z:0}, e.extrusionDirection);
+        out.push({layer:'__SNOWGUARD__', verts:[[w[0]/1000,w[1]/1000],[w[0]/1000,w[1]/1000]], name:nm});
+      }
       continue;
     }
   }
