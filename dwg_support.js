@@ -42,16 +42,20 @@ function ocsToWorld(pt,N){
   ];
 }
 
-/* ---- INSERT footprint in WORLD coords (meters), via OCS ---- */
-function insertRectWorld(e, wmm, hmm){
+/* ---- INSERT footprint in WORLD coords (meters), via OCS ----
+   `origin` is the block geometry's min-corner offset {ox,oy} read from the real block (in block
+   units). The block geometry spans origin..origin+(w,h). Passing the true origin makes centered
+   blocks (origin=-w/2) and corner blocks (origin=0) both line up exactly with the DWG. If origin
+   is omitted we fall back to corner (0,0). */
+function insertRectWorld(e, wmm, hmm, origin){
   const ip=e.insertionPoint||{x:0,y:0,z:0};
   const rot=e.rotation||0, c=Math.cos(rot), s=Math.sin(rot);
   const N=e.extrusionDirection;
-  // corners in OCS plane (block drawn from insertion corner)
-  const cor=[[0,0],[wmm,0],[wmm,hmm],[0,hmm]];
+  const ox = origin? origin.ox : 0, oy = origin? origin.oy : 0;
+  const cor=[[ox,oy],[ox+wmm,oy],[ox+wmm,oy+hmm],[ox,oy+hmm]];
   return cor.map(([x,y])=>{
-    const ox=ip.x+(x*c - y*s), oy=ip.y+(x*s + y*c);
-    const w=ocsToWorld({x:ox, y:oy, z:ip.z||0}, N);
+    const wx=ip.x+(x*c - y*s), wy=ip.y+(x*s + y*c);
+    const w=ocsToWorld({x:wx, y:wy, z:ip.z||0}, N);
     return [w[0]/1000, w[1]/1000];
   });
 }
@@ -118,7 +122,8 @@ function roofFaceInfo(e){
   return {verts, pitch, dz, ridge};
 }
 
-function mapSPT(entities){
+function mapSPT(entities, blockOrigin){
+  blockOrigin = blockOrigin||{};
   const out=[];
   const auraPlates=[];
   const roofs=[];
@@ -126,12 +131,13 @@ function mapSPT(entities){
     const lay=e.layer;
     if(lay==='Modules' && e.type==='INSERT'){
       const t=moduleTypeFromName(e.name);
+      const org=blockOrigin[e.name];
       if(t){
         const wmm=t==='XL'?1940:(t==='L'?1380:1010);
-        out.push({layer:'MODULES', verts:insertRectWorld(e,wmm,857), name:e.name, modType:t});
+        out.push({layer:'MODULES', verts:insertRectWorld(e,wmm,857,org), name:e.name, modType:t});
       } else {
         const aw=auraWidthFromName(e.name);
-        if(aw){ const ah=auraHeightFromName(e.name); auraPlates.push({widthMM:aw, heightMM:ah, verts:insertRectWorld(e,aw,ah)}); }
+        if(aw){ const ah=auraHeightFromName(e.name); auraPlates.push({widthMM:aw, heightMM:ah, verts:insertRectWorld(e,aw,ah,org)}); }
       }
       continue;
     }
@@ -147,18 +153,16 @@ function mapSPT(entities){
     }
     if(lay==='SnowGuard' && e.type==='INSERT'){
       const nm=e.name||'';
-      // SnowGuardModuleSize entries are the (reduced-height) Aura plates that sit under the
-      // snow-guard supports at the eaves. Their size is encoded in the name "Min: x1,y1, max: x2,y2".
-      const ms=nm.match(/Min:\s*(-?[\d.]+),\s*(-?[\d.]+),\s*max:\s*(-?[\d.]+),\s*(-?[\d.]+)/i);
-      if(/SnowGuardModuleSize/i.test(nm) && ms){
-        const wmm=Math.abs(parseFloat(ms[3])-parseFloat(ms[1]));
-        const hmm=Math.abs(parseFloat(ms[4])-parseFloat(ms[2]));
-        if(wmm>=200 && hmm>=200){
-          const verts=insertRectWorld(e,wmm,hmm);
-          // dedupe: skip if a normal aura plate already covers this spot (centroid within 0.3m)
+      // SnowGuardModuleSize entries are the (reduced-height) Aura plates under the snow-guard
+      // supports at the eaves. Their real size+origin come from the block geometry (same as
+      // normal aura), NOT from the name's Min/max (which are in a different coordinate frame).
+      if(/SnowGuardModuleSize/i.test(nm)){
+        const org=blockOrigin[nm];
+        if(org && org.w>=200 && org.h>=200){
+          const verts=insertRectWorld(e,org.w,org.h,org);
           let cx=0,cy=0;verts.forEach(p=>{cx+=p[0];cy+=p[1];});cx/=verts.length;cy/=verts.length;
           const dup=auraPlates.some(a=>{let ax=0,ay=0;a.verts.forEach(p=>{ax+=p[0];ay+=p[1];});ax/=a.verts.length;ay/=a.verts.length;return Math.hypot(ax-cx,ay-cy)<0.30;});
-          if(!dup) auraPlates.push({widthMM:Math.round(wmm), heightMM:Math.round(hmm), verts, snowGuard:true});
+          if(!dup) auraPlates.push({widthMM:Math.round(org.w), heightMM:Math.round(org.h), verts, snowGuard:true});
         }
       } else if(/SchneeHalter/i.test(nm)) {
         const w=ocsToWorld(e.insertionPoint||{x:0,y:0,z:0}, e.extrusionDirection);
@@ -175,7 +179,19 @@ window.__readDWG = async function(arrayBuffer){
   const dwg=L.dwg_read_data(arrayBuffer, Dwg_File_Type.DWG);
   const db=L.convert(dwg);
   const ents=db.entities||[];
-  const {resolved, auraPlates, roofs}=mapSPT(ents);
+  // Map each block name to the offset of its geometry's min-corner from the insertion origin.
+  // SPT draws some blocks centered (geometry runs -w/2..+w/2) and some corner-based (0..w);
+  // reading the real block geometry lets the plan line up exactly with the DWG either way.
+  const blockOrigin={};
+  try{
+    const recs=(db.tables&&db.tables.BLOCK_RECORD&&db.tables.BLOCK_RECORD.entries)||[];
+    recs.forEach(b=>{
+      const poly=(b.entities||[]).find(e=>/POLYLINE|LWPOLYLINE/.test(e.type)&&e.vertices&&e.vertices.length>=3);
+      if(poly){let mnx=1e9,mny=1e9,mxx=-1e9,mxy=-1e9;poly.vertices.forEach(p=>{mnx=Math.min(mnx,p.x);mny=Math.min(mny,p.y);mxx=Math.max(mxx,p.x);mxy=Math.max(mxy,p.y);});
+        blockOrigin[b.name]={ox:mnx, oy:mny, w:mxx-mnx, h:mxy-mny};}
+    });
+  }catch(e){}
+  const {resolved, auraPlates, roofs}=mapSPT(ents, blockOrigin);
   window.__SPT_AURA = auraPlates;
   window.__SPT_ROOFS = roofs;
   return resolved;
