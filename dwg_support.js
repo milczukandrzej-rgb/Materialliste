@@ -156,7 +156,11 @@ function mapSPT(entities, blockOrigin){
       // SnowGuardModuleSize entries are the (reduced-height) Aura plates under the snow-guard
       // supports at the eaves. Their real size+origin come from the block geometry (same as
       // normal aura), NOT from the name's Min/max (which are in a different coordinate frame).
-      if(/SnowGuardModuleSize/i.test(nm)){
+      // Both SnowGuardModuleSize AND SchneeHalter blocks carry a real (reduced-height ~430mm)
+      // Aura-plate geometry at the eaves — SchneeHalter additionally marks a snow-guard support.
+      // Earlier we treated SchneeHalter as a point marker only, which left its Aura plate missing
+      // on faces where SPT used SchneeHalter blocks (e.g. faces 1/2/5). Draw the plate for both.
+      if(/SnowGuardModuleSize/i.test(nm) || /SchneeHalter/i.test(nm)){
         const org=blockOrigin[nm];
         if(org && org.w>=200 && org.h>=200){
           const verts=insertRectWorld(e,org.w,org.h,org);
@@ -164,9 +168,10 @@ function mapSPT(entities, blockOrigin){
           const dup=auraPlates.some(a=>{let ax=0,ay=0;a.verts.forEach(p=>{ax+=p[0];ay+=p[1];});ax/=a.verts.length;ay/=a.verts.length;return Math.hypot(ax-cx,ay-cy)<0.30;});
           if(!dup) auraPlates.push({widthMM:Math.round(org.w), heightMM:Math.round(org.h), verts, snowGuard:true});
         }
-      } else if(/SchneeHalter/i.test(nm)) {
-        const w=ocsToWorld(e.insertionPoint||{x:0,y:0,z:0}, e.extrusionDirection);
-        out.push({layer:'__SNOWGUARD__', verts:[[w[0]/1000,w[1]/1000],[w[0]/1000,w[1]/1000]], name:nm});
+        if(/SchneeHalter/i.test(nm)){
+          const w=ocsToWorld(e.insertionPoint||{x:0,y:0,z:0}, e.extrusionDirection);
+          out.push({layer:'__SNOWGUARD__', verts:[[w[0]/1000,w[1]/1000],[w[0]/1000,w[1]/1000]], name:nm});
+        }
       }
       continue;
     }

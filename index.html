@@ -1053,6 +1053,11 @@ function drawPlan(){
   S.drawnEdges.forEach(e=>poly([e.a,e.b],ET()[e.type].col,null,3.5));
   // draw-in-progress
   if(drawStart){const[X,Y]=W2S(drawStart[0],drawStart[1]);ctx.beginPath();ctx.arc(X,Y,4,0,7);ctx.fillStyle=ET()[S.drawType||'First'].col;ctx.fill();}
+  // SPT snow-guard supports (Schneefangstützen as drawn in SPT) — small markers at the eaves
+  if(S.showSnow!==false && S.sptSnow && S.sptSnow.length){
+    ctx.fillStyle='#7a4fc0'; ctx.strokeStyle='#fff'; ctx.lineWidth=1;
+    S.sptSnow.forEach(p=>{const[X,Y]=W2S(p[0],p[1]);ctx.beginPath();ctx.arc(X,Y,3.5,0,7);ctx.fill();ctx.stroke();});
+  }
   // numbered face badges ON TOP (match the "Dachneigung je Fläche" panel) so faces↔pitch are mappable
   if(S.roofs && S.roofs.length && S.activeBuilding==='ALL'){
     S.roofs.forEach((r,i)=>{
