@@ -507,7 +507,7 @@ function auraForBuilding(b){
   //     then fill each sub-segment with the standard plate matching its width (remainder cut,
   //     >=400mm). Fuge = vertical joint between two filled tiles; the open roof edge (Ort) is
   //     a Seitenanschlussprofil, not a Fuge.
-  const STEP=0.02, EDGE=0.12, SNAP=0.08;
+  const STEP=0.02, EDGE=0.12, SNAP=0.08, LAP=0.10;
   let plates=0, fug=0; const byWidth={1380:0,1940:0,2770:0,cut:0}; const cutWidths=[];
   const inv=([x,y])=>[x*cc+y*ss, -x*ss+y*cc]; // rotated frame -> world
   const plateRects=[]; // {verts:[world...], w, kind}
@@ -515,6 +515,14 @@ function auraForBuilding(b){
   function isMod(x,y){return modR.some(m=>pointInPoly([x,y],m));}
   function isBar(x,y){return barR.some(z=>pointInPoly([x,y],z));}
   function freeAt(x,y){return onRoof(x,y)&&!isMod(x,y)&&!isBar(x,y);}
+  // frei über die GANZE Plattenhöhe (unten/Mitte/oben, LAP = konstruktive 90-mm-Überdeckung).
+  // Nur die Mittellinie zu testen liess Platten über Störflächen und die schräge Dachkante
+  // ragen, wenn diese nur oben/unten in die Zeile hineinreichen.
+  function freeBand(x,yb){
+    const ys=[yb+LAP, yb+PH/2, yb+PH-LAP];
+    for(const y of ys){ if(!onRoof(x,y)||isMod(x,y)||isBar(x,y)) return false; }
+    return true;
+  }
 
   // --- module raster anchors (rotated frame) ---
   // vertical column edges (left/right x of each module)
@@ -537,28 +545,34 @@ function auraForBuilding(b){
   for(let y=anchor+ROW; y<=modTop+0.02; y+=ROW) rowYs.push(y);
 
   function classify(w){ for(const s of [1.38,1.94,2.77]) if(Math.abs(w-s)<=0.06) return {w:s,kind:s===2.77?'2770':s===1.94?'1940':'1380'}; return null; }
-  // fill a single free segment [a,bb] at row bottom yb, snapping joints to the module column grid
-  function fillSegment(a,bb,yb,nRef){
+  // fill a single free segment [a,bb] at row bottom yb, snapping joints to the module column grid.
+  // hV (optional): {y0,h} = reduzierte Plattenhöhe fürs Layout (Störflächen-/Kantenzone);
+  // die Materialzählung (Zuschnitt aus Standardplatte) bleibt gleich.
+  function fillSegment(a,bb,yb,nRef,hV){
+    const ry=hV?hV.y0:yb, rh=hV?hV.h:PH;
+    const rect=(x,w)=>({verts:[[x,ry],[x+w,ry],[x+w,ry+rh],[x,ry+rh]].map(inv),w:Math.round(w*1000)});
     let cx=a; let guard=0;
     while(bb-cx>=MINW && guard++<50){
       const w=bb-cx;
       const cl=classify(w);
       if(cl && w<=2.77+0.06){ // whole remaining segment is ~a standard plate
         byWidth[cl.kind==='2770'?2770:cl.kind==='1940'?1940:1380]++;
-        plateRects.push({verts:[[cx,yb],[cx+cl.w,yb],[cx+cl.w,yb+PH],[cx,yb+PH]].map(inv),w:Math.round(cl.w*1000),kind:cl.kind});
+        plateRects.push(Object.assign(rect(cx,cl.w),{kind:hV?'cut':cl.kind}));
         cx+=cl.w+GAP; plates++; nRef.n++; continue;
       }
       // choose the largest standard that leaves either 0 or >=MINW remainder
       let chosen=null;
       for(const s of [2.77,1.94,1.38]){ if(s<=w+0.06){ const rem=w-s; if(rem<=0.06||rem>=MINW){chosen=s;break;} } }
-      if(chosen==null) chosen=[2.77,1.94,1.38].find(s=>s<=w+0.06)||null;
       if(chosen!=null){
         const k=chosen===2.77?'2770':chosen===1.94?'1940':'1380';byWidth[chosen===2.77?2770:chosen===1.94?1940:1380]++;
-        plateRects.push({verts:[[cx,yb],[cx+chosen,yb],[cx+chosen,yb+PH],[cx,yb+PH]].map(inv),w:Math.round(chosen*1000),kind:k});
+        plateRects.push(Object.assign(rect(cx,chosen),{kind:hV?'cut':k}));
         cx+=chosen+GAP; plates++; nRef.n++;
-      } else { // remainder smaller than smallest plate -> cut plate
-        byWidth.cut++; cutWidths.push(Math.round(w*1000));
-        plateRects.push({verts:[[cx,yb],[cx+w,yb],[cx+w,yb+PH],[cx,yb+PH]].map(inv),w:Math.round(w*1000),kind:'cut'});
+      } else {
+        // kein Standard passt sauber (Rest wäre <400 mm) -> EINE breitere Zuschnittplatte
+        // über die ganze Restbreite (PV*Sol-Stil), statt Standardplatte + verworfener Lücke
+        const cw=Math.min(w,2.77);
+        byWidth.cut++; cutWidths.push(Math.round(cw*1000));
+        plateRects.push(Object.assign(rect(cx,cw),{kind:'cut'}));
         cx=bb; plates++; nRef.n++;
       }
     }
@@ -567,10 +581,10 @@ function auraForBuilding(b){
   rowYs.forEach(yb=>{
     const yc=yb+PH/2;
     if(yb+PH > modTop+0.05) return; // never above module band (First strip stays free)
-    // free runs along this row centre
+    // free runs over the full plate band of this row
     const runs=[]; let cur=null;
     for(let x=x0; x<=x1; x+=STEP){
-      if(freeAt(x,yc)){ if(!cur)cur=[x,x]; else cur[1]=x; }
+      if(freeBand(x,yb)){ if(!cur)cur=[x,x]; else cur[1]=x; }
       else { if(cur){runs.push(cur);cur=null;} }
     }
     if(cur)runs.push(cur);
@@ -597,6 +611,26 @@ function auraForBuilding(b){
       fug += Math.max(nRef.n-1,0);
       if(leftMod)  fug++;
       if(rightMod) fug++;
+    });
+    // Pass 2: Mittellinie frei, aber volle Plattenhöhe blockiert (Störfläche oder Dachkante
+    // ragt in die Zeile) -> höhenreduzierte Zuschnittplatten, wie PV*Sol sie dort setzt.
+    const runs2=[]; cur=null;
+    for(let x=x0; x<=x1; x+=STEP){
+      if(!freeBand(x,yb) && freeAt(x,yc)){ if(!cur)cur=[x,x]; else cur[1]=x; }
+      else { if(cur){runs2.push(cur);cur=null;} }
+    }
+    if(cur)runs2.push(cur);
+    runs2.forEach(run=>{
+      if(run[1]-run[0]<MINW) return;
+      // freie Höhe in der Mitte des Runs ermitteln (Intervall um die Mittellinie)
+      const xm=(run[0]+run[1])/2;
+      let ylo=yc, yhi=yc;
+      while(ylo-0.03>=yb    && freeAt(xm,ylo-0.03)) ylo-=0.03;
+      while(yhi+0.03<=yb+PH && freeAt(xm,yhi+0.03)) yhi+=0.03;
+      if(yhi-ylo<0.25) return; // zu schmaler Streifen
+      const nRef={n:0};
+      fillSegment(run[0],run[1],yb,nRef,{y0:ylo,h:yhi-ylo});
+      fug += Math.max(nRef.n-1,0);
     });
   });
   return {m2:Math.round(m2*10)/10, plates, byWidth, auraFugen:fug, plateRects, cutWidths};
