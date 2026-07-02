@@ -167,10 +167,9 @@ function mapSPT(entities, blockOrigin){
           let cx=0,cy=0;verts.forEach(p=>{cx+=p[0];cy+=p[1];});cx/=verts.length;cy/=verts.length;
           const dup=auraPlates.some(a=>{let ax=0,ay=0;a.verts.forEach(p=>{ax+=p[0];ay+=p[1];});ax/=a.verts.length;ay/=a.verts.length;return Math.hypot(ax-cx,ay-cy)<0.30;});
           if(!dup) auraPlates.push({widthMM:Math.round(org.w), heightMM:Math.round(org.h), verts, snowGuard:true});
-        }
-        if(/SchneeHalter/i.test(nm)){
-          const w=ocsToWorld(e.insertionPoint||{x:0,y:0,z:0}, e.extrusionDirection);
-          out.push({layer:'__SNOWGUARD__', verts:[[w[0]/1000,w[1]/1000],[w[0]/1000,w[1]/1000]], name:nm});
+          // snow-guard runs along the eave edge = the plate's bottom edge (the two corners at oy).
+          // insertRectWorld corner order is [oy, oy, oy+h, oy+h] -> corners 0 and 1 form the bottom edge.
+          out.push({layer:'__SNOWGUARD__', verts:[verts[0], verts[1]], name:nm, snowLine:true});
         }
       }
       continue;
