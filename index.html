@@ -368,7 +368,8 @@ const S = {
   raw:null, mods:[], carriers:[], barred:[], env:[], buildings:[], roofs:[],
   layers:{},
   edgeCands:[],        // {id,a,b,len,interior,assigned:null|type}
-  assign:{},           // id -> type  (First/Traufe/Ort/Grat/Kehle/Schneefang)
+  assign:{},           // id -> type  (First/Traufe/Ort/Grat/Kehle)
+  assignSnow:{},       // id -> true  (Schneefang, zusätzlich zum Kantentyp möglich)
   drawnEdges:[],       // free-drawn {a,b,len,type}
   params:{ h0:1000, neigung:12, ortVariante:'seitenanschluss', firstVariante:'standard', firstSeiten:2, auraGlobal:true, schneefang:false },
   activeBuilding:'ALL', activeTool:null, result:null
@@ -623,24 +624,35 @@ function buildEdgeCandidates(){
 function nearestBuilding(pt){let best=null,bd=1e18;for(const b of S.buildings){const d=(pt[0]-b.cx)**2+(pt[1]-b.cy)**2;if(d<bd){bd=d;best=b;}}return best?best.name:'H1';}
 
 /* ---- collect assigned edge lengths per building per type ---- */
+// edge types the user has marked manually (click or free-draw) — auto data of
+// the SAME type is then suppressed, other types keep their automatic values
+function userOverrideTypes(){
+  const set=new Set(Object.values(S.assign));
+  S.drawnEdges.forEach(e=>set.add(e.type));
+  if(Object.keys(S.assignSnow||{}).length)set.add('Schneefang');
+  return set;
+}
 function edgeLengthsByBuilding(){
   const out={};S.buildings.forEach(b=>out[b.name]={First:0,Traufe:0,Ort:0,Grat:0,Kehle:0,Schneefang:0,firstLines:[]});
   function add(a,b,len,type){const nm=nearestBuilding(mid(a,b));out[nm][type]+=len;if(type==='First')out[nm].firstLines.push(len);}
   // assigned candidates
   S.edgeCands.forEach(e=>{const t=S.assign[e.id];if(t)add(e.a,e.b,e.len,t);});
+  // Schneefang overlay (unabhängig vom Kantentyp, z. B. zusätzlich zu Traufe)
+  S.edgeCands.forEach(e=>{if(S.assignSnow[e.id])add(e.a,e.b,e.len,'Schneefang');});
   // free-drawn
   S.drawnEdges.forEach(e=>add(e.a,e.b,e.len,e.type));
-  // if NOTHING assigned AND preset exists, use preset (existing layers)
-  const anyAssigned=Object.keys(S.assign).length>0||S.drawnEdges.length>0;
-  if(!anyAssigned && S.preset && S.preset.length){
-    S.preset.forEach(p=>add(p.a,p.b,p.len,p.type));
+  const over=userOverrideTypes();
+  // DXF-Layer-Vorbelegung (PV*Sol): PRO TYP nutzen, bis der Typ manuell markiert wird
+  if(S.preset && S.preset.length){
+    S.preset.forEach(p=>{ if(!over.has(p.type)) add(p.a,p.b,p.len,p.type); });
+  }
+  // auto Schneefang from SPT snow-guard markers (DWG), unless user marked Schneefang manually
+  if(!over.has('Schneefang') && S.sptSnow && S.sptSnow.length){
+    S.sptSnow.forEach(seg=>{ if(seg&&seg.length>=2){ const len=H(seg[0],seg[1]); if(len>0.05) add(seg[0],seg[1],len,'Schneefang'); } });
   }
   // auto First from SPT roof ridge lines (DWG): add unless user already marked First on that face
-  if(S.roofs && S.roofs.length){
-    const userFirst = S.edgeCands.some(e=>S.assign[e.id]==='First') || S.drawnEdges.some(e=>e.type==='First');
-    if(!userFirst){
-      S.roofs.forEach(r=>{ if(r.ridge && !r.firstOff){ const len=H(r.ridge[0],r.ridge[1]); add(r.ridge[0],r.ridge[1],len,'First'); } });
-    }
+  if(S.roofs && S.roofs.length && !over.has('First')){
+    S.roofs.forEach(r=>{ if(r.ridge && !r.firstOff){ const len=H(r.ridge[0],r.ridge[1]); add(r.ridge[0],r.ridge[1],len,'First'); } });
   }
   return out;
 }
@@ -853,12 +865,14 @@ function onParsed(resolved){
   // SPT snowguard markers -> preset Schneefang points
   S.sptSnow = (byL['__SNOWGUARD__']||[]).map(e=>e.verts);
   S.buildings=clusterBuildings(S.mods);
-  S.assign={};S.drawnEdges=[];
+  S.assign={};S.assignSnow={};S.drawnEdges=[];
   buildEdgeCandidates();
+  // Schneefang erkannt (SPT-Marker oder DXF-Layer) -> Berechnung automatisch einschalten
+  if((S.sptSnow&&S.sptSnow.length)||(S.preset&&S.preset.some(p=>p.type==='Schneefang')))S.params.schneefang=true;
   return {ok:true};
 }
 
-window.__SUN={S,EDGE_TYPES,parse:onParsed,compute,nearestBuilding,centroid,polyLen,H,mid,render:function(){}};
+window.__SUN={S,EDGE_TYPES,parse:onParsed,compute,nearestBuilding,centroid,polyLen,H,mid,userOverrideTypes,render:function(){}};
 })();
 
 </script>
@@ -935,7 +949,7 @@ function buildParams(){
   box.appendChild(field('First-Variante',null,selStr('firstVariante',[['standard','Standard'],['variabel','Variable Entlüftung'],['aura','First an Aura 2'],['strackort','Strackort']],p.firstVariante),'Komponentenbreite adaptiv 2770/1940.'));
   box.appendChild(field('First-Dachseiten',null,selNum('firstSeiten',[[2,'2 Seiten (Satteldach)'],[1,'1 Seite (Pult / einseitig)']],p.firstSeiten),'Firstplatten/Anschlussbleche pro Seite. Pultdach = 1.'));
   box.appendChild(tog('auraGlobal','Aura 2-Restfläche füllen',p.auraGlobal,'Restfläche der Dachflächen wird mit Aura-Platten aufgefüllt. Aus bei Fremdeindeckung.'));
-  box.appendChild(tog('schneefang','Schneefang rechnen',p.schneefang,'Kanten als „Schneefang" markieren, um Stützen/Rohre zu rechnen.'));
+  box.appendChild(tog('schneefang','Schneefang rechnen',p.schneefang,'Wird bei erkanntem Schneefang (SPT-Marker / DXF-Layer) automatisch eingeschaltet. Manuell markierte „Schneefang"-Kanten ersetzen die Automatik.'));
   box.querySelectorAll('select,input').forEach(inp=>inp.addEventListener('change',()=>{const k=inp.dataset.k;if(inp.type==='checkbox')p[k]=inp.checked;else if(inp.type==='number')p[k]=parseFloat(inp.value)||0;else p[k]=isNaN(+inp.value)?inp.value:+inp.value;buildParams();A().compute();renderAll();}));
 }
 function field(l,m,c,h){const f=el('div','field');f.appendChild(el('label','lab',l+(m?` <span class="meta">${m}</span>`:'')));f.appendChild(c);if(h)f.appendChild(el('div','help',h));return f;}
@@ -983,7 +997,7 @@ function buildPalette(){
   draw.onclick=()=>{S.activeTool=(S.activeTool==='__draw'?null:'__draw');drawStart=null;buildPalette();drawPlan();};
   box.appendChild(draw);
   const clr=el('button','edgebtn ghost','✕ Auswahl löschen');
-  clr.onclick=()=>{S.assign={};S.drawnEdges=[];S.activeTool=null;drawStart=null;buildPalette();A().compute();renderAll();};
+  clr.onclick=()=>{S.assign={};S.assignSnow={};S.drawnEdges=[];S.activeTool=null;drawStart=null;buildPalette();A().compute();renderAll();};
   box.appendChild(clr);
   // when draw tool active, need a target type
   if(S.activeTool==='__draw'){
@@ -995,7 +1009,8 @@ function buildPalette(){
   }
   $('#editorhint').textContent = S.activeTool==='__draw'
     ? 'Freihand: Startpunkt klicken, dann Endpunkt. Wird als '+(ET()[S.drawType]||{label:''}).label+' gezählt.'
-    : (S.activeTool ? 'Klicke Kanten an, um sie als '+ET()[S.activeTool].label+' zu markieren.' : 'Wähle oben einen Kanten-Typ, dann klicke Kanten auf dem Plan an.');
+    : (S.activeTool==='Schneefang' ? 'Klicke Kanten an, um Schneefang zu setzen (zusätzlich zu Traufe möglich). Manuelle Markierung ersetzt die automatische Schneefang-Erkennung.'
+    : (S.activeTool ? 'Klicke Kanten an, um sie als '+ET()[S.activeTool].label+' zu markieren.' : 'Wähle oben einen Kanten-Typ, dann klicke Kanten auf dem Plan an.'));
 }
 
 /* ---- building pills ---- */
@@ -1040,12 +1055,38 @@ function drawPlan(){
   // modules (opaque, drawn on top of aura)
   const col={L:'#1b4f9c',M:'#3a74c4',XL:'#0e3a78'};
   mods.forEach(m=>poly(m.v,'#13386e',col[m.type]||'#1b4f9c',0.6));
+  // AUTO edge data (drawn UNDER the clickable candidates, semi-transparent + dashed,
+  // and hidden per type as soon as the user marks that type manually — mirrors the counting)
+  const over=A().userOverrideTypes();
+  // DXF-Layer-Vorbelegung (PV*Sol): First/Ort/Grat/Kehle/Schneefang aus der Datei
+  if(S.preset && S.preset.length){
+    ctx.globalAlpha=.55;
+    S.preset.forEach(p=>{ if(!over.has(p.type)) poly([p.a,p.b],ET()[p.type].col,null,3,[8,5]); });
+    ctx.globalAlpha=1;
+  }
+  // SPT snow-guard line (Schneefang) — runs along the eave edges of the snow-guard plates
+  if(S.showSnow!==false && !over.has('Schneefang') && S.sptSnow && S.sptSnow.length){
+    ctx.globalAlpha=.55; ctx.strokeStyle='#7a4fc0'; ctx.lineWidth=4; ctx.lineCap='round'; ctx.setLineDash([8,5]);
+    S.sptSnow.forEach(seg=>{ if(!seg||seg.length<2)return;
+      const[X0,Y0]=W2S(seg[0][0],seg[0][1]); const[X1,Y1]=W2S(seg[1][0],seg[1][1]);
+      ctx.beginPath();ctx.moveTo(X0,Y0);ctx.lineTo(X1,Y1);ctx.stroke();
+    });
+    ctx.setLineDash([]); ctx.lineCap='butt'; ctx.globalAlpha=1;
+  }
   // candidate edges (clickable) — interior dashed grey, boundary thin grey
   S.edgeCands.forEach(e=>{
     const t=S.assign[e.id];
     const c=t?ET()[t].col:(e.interior?'#aab':'#cbd');
     const w=t?3.5:(e.interior?2:1.4);
     poly([e.a,e.b],c,null,w, t?[]:(e.interior?[6,4]:[2,4]));
+    // Schneefang overlay: solid purple line, parallel-offset so it stays visible
+    // even when the same edge is also marked (e.g. as Traufe)
+    if(S.assignSnow && S.assignSnow[e.id]){
+      const[ax,ay]=W2S(e.a[0],e.a[1]),[bx,by]=W2S(e.b[0],e.b[1]);
+      const dx=bx-ax,dy=by-ay,L=Math.hypot(dx,dy)||1,nx=-dy/L*4,ny=dx/L*4;
+      ctx.beginPath();ctx.moveTo(ax+nx,ay+ny);ctx.lineTo(bx+nx,by+ny);
+      ctx.strokeStyle=ET().Schneefang.col;ctx.lineWidth=3;ctx.setLineDash([]);ctx.lineCap='round';ctx.stroke();ctx.lineCap='butt';
+    }
     // endpoint dots for clickable affordance
     if(!t){const[mx,my]=W2S(e.m[0],e.m[1]);ctx.beginPath();ctx.arc(mx,my,2.5,0,7);ctx.fillStyle='#99a';ctx.fill();}
   });
@@ -1053,15 +1094,6 @@ function drawPlan(){
   S.drawnEdges.forEach(e=>poly([e.a,e.b],ET()[e.type].col,null,3.5));
   // draw-in-progress
   if(drawStart){const[X,Y]=W2S(drawStart[0],drawStart[1]);ctx.beginPath();ctx.arc(X,Y,4,0,7);ctx.fillStyle=ET()[S.drawType||'First'].col;ctx.fill();}
-  // SPT snow-guard line (Schneefang) — runs along the eave edges of the snow-guard plates
-  if(S.showSnow!==false && S.sptSnow && S.sptSnow.length){
-    ctx.strokeStyle='#7a4fc0'; ctx.lineWidth=4; ctx.lineCap='round';
-    S.sptSnow.forEach(seg=>{ if(!seg||seg.length<2)return;
-      const[X0,Y0]=W2S(seg[0][0],seg[0][1]); const[X1,Y1]=W2S(seg[1][0],seg[1][1]);
-      ctx.beginPath();ctx.moveTo(X0,Y0);ctx.lineTo(X1,Y1);ctx.stroke();
-    });
-    ctx.lineCap='butt';
-  }
   // numbered face badges ON TOP (match the "Dachneigung je Fläche" panel) so faces↔pitch are mappable
   if(S.roofs && S.roofs.length && S.activeBuilding==='ALL'){
     S.roofs.forEach((r,i)=>{
@@ -1125,7 +1157,15 @@ function setupCanvas(){
       return;
     }
     const e=nearestCandidate(sx,sy);
-    if(e){ if(S.assign[e.id]===S.activeTool) delete S.assign[e.id]; else S.assign[e.id]=S.activeTool; A().compute();renderAll(); }
+    if(e){
+      if(S.activeTool==='Schneefang'){
+        // Schneefang liegt ZUSÄTZLICH auf der Kante (z. B. Traufe + Schneefang) — nicht überschreiben
+        if(S.assignSnow[e.id]) delete S.assignSnow[e.id]; else S.assignSnow[e.id]=true;
+      } else {
+        if(S.assign[e.id]===S.activeTool) delete S.assign[e.id]; else S.assign[e.id]=S.activeTool;
+      }
+      A().compute();renderAll();
+    }
   });
   // zoom buttons
   const zin=$('#zoomin'),zout=$('#zoomout'),zfit=$('#zoomfit');
@@ -1177,10 +1217,12 @@ function fmt(v){if(v===0)return '–';if(Number.isInteger(v))return v.toLocaleSt
 
 /* ---- note ---- */
 function renderNote(){const S=St(),p=S.params,n=$('#assumptions');const warn=p.h0>1400&&p.auraGlobal;n.className='note'+(warn?' warn':'');
-  const assigned=Object.keys(S.assign).length+S.drawnEdges.length;
+  const assigned=Object.keys(S.assign).length+Object.keys(S.assignSnow||{}).length+S.drawnEdges.length;
   n.innerHTML=(warn?'<b>H₀ &gt; 1400 m:</b> Aura 2 nur mit Freigabe TS. ':'')+
     `Aura = Restfläche der Dachflächen ins Plattenraster. First beidseitig. `+
-    `${assigned} Kanten manuell zugewiesen${assigned===0&&S.preset&&S.preset.length?' (Layer aus DXF werden genutzt)':''}. `+
+    `${assigned} Kanten manuell zugewiesen`+
+    (S.preset&&S.preset.length?' · DXF-Layer werden je Kantentyp automatisch genutzt, bis der Typ manuell markiert wird':'')+
+    (S.sptSnow&&S.sptSnow.length?' · Schneefang automatisch aus SPT erkannt':'')+`. `+
     `Kanten ohne Zuweisung bleiben unberücksichtigt – First/Grat/Kehle im Editor markieren.`;
 }
 
