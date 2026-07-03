@@ -38,15 +38,31 @@ einen lokalen Webserver geöffnet werden (Browser-Sicherheit verbietet WASM-Lade
 4. Materialliste pro Gebäude prüfen, als Excel/CSV exportieren.
 
 ## Aura-Platten
-- **Auto-Layout:** Standardbreiten (1380/1940/2770) strikt am Modulraster;
-  Störflächen-Zeilen bleiben frei, nichts ragt über die Dachkante.
+- **Auto-Layout (intelligente Auffüllung):** Standardbreiten (1380/1940/2770)
+  strikt am Modulraster; Restlücken ab 400 mm werden mit Zuschnittplatten
+  gefüllt, die an Modul- und Störflächenkanten andocken. Nichts ragt über die
+  Dachkante.
+- **Bestellung mit Abschnitt-Wiederverwendung:** Zuschnittbreiten werden
+  nebeneinander aus möglichst wenigen Rohlingen geschnitten; höhenreduzierte
+  Platten (≤ 440 mm) zu zweit übereinander aus einem Rohling. Aufsteckprofil
+  und Plattenauflager zählen trotzdem **je verbautem Teilstück**. Die Zeile
+  „davon aus Abschnitten gedeckt" zeigt die eingesparten Rohlinge.
 - **„⬚ Aura bearbeiten":** Platten verschieben (ziehen), Breite/Höhe an den
-  Kanten ziehen (rastet auf Standardbreiten und Modulkanten), „+ Platte",
-  „– Platte löschen" (oder Entf), „↺ Auto-Layout" stellt die Automatik wieder her.
-  Abweichende Masse werden als Zuschnitt aus der nächstgrösseren Platte bestellt.
+  Kanten ziehen (rastet auf Standardbreiten, Modul- und Störflächenkanten).
+  Klick auf leere Fläche setzt den **Einfügepunkt (×)** — „+ Platte" erzeugt
+  die Platte dort (CAD-Prinzip). „– Platte löschen" (oder Entf),
+  „↺ Auto-Layout" stellt die Automatik wieder her.
 - **Layer „Aura" in der Datei:** Rechtecke auf einem Layer namens `Aura`
   (DXF oder DWG) werden 1:1 als Platten-Layout übernommen und sind im Editor
   weiter bearbeitbar.
+
+## Mehrere Dächer / ein Objekt
+Mit **„+ Dach hinzufügen"** (über der Materialliste) weitere DXF/DWG-Dateien
+zum selben Objekt laden. Jedes Dach wird als eigenes Gebäude (H1, H2, …)
+geführt; die Materialliste zeigt Spalten je Gebäude und die Gesamtsumme —
+eine komplette Liste für das ganze Objekt. Hinweis: manuelle Kanten-/Aura-
+Änderungen werden beim Hinzufügen zurückgesetzt, daher zuerst alle Dächer
+laden, dann bearbeiten.
 
 ## Schneefang
 Automatisch erkannte Schneefang-Linien (SPT-Marker bzw. DXF-Layer `Schneefang`)
