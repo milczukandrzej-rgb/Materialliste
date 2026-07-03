@@ -221,6 +221,7 @@
         <div class="toolbar">
           <div class="buildingpills" id="pills"></div>
           <div class="sp"></div>
+          <button class="btn ghost" id="addroof" title="Weitere DXF/DWG (z. B. zweites Dach desselben Objekts) hinzufügen — Gebäude werden als H1, H2, … geführt, die Liste summiert alles. Achtung: manuelle Kanten-/Aura-Änderungen werden dabei zurückgesetzt.">+ Dach hinzufügen</button>
           <button class="btn ghost" id="exportcsv">CSV</button>
           <button class="btn blue" id="export">Excel exportieren</button>
         </div>
@@ -461,6 +462,10 @@ function auraForBuilding(b){
     if(plates.length){
       const byW={};
       let m2=0; const plateRects=[];
+      // frame + framePlates auch hier liefern, damit der Aura-Editor SPT-Platten
+      // übernehmen kann (sonst verschwinden sie beim Einfrieren des Layouts)
+      const frame=buildingFrame(b);
+      const framePlates=[];
       plates.forEach(p=>{
         const w=p.widthMM;
         const bucket = w<=1380?1380 : (w<=1940?1940:2770);
@@ -468,10 +473,15 @@ function auraForBuilding(b){
         m2 += (w/1000)*((p.heightMM||870)/1000);
         const kind = bucket===2770?'2770':bucket===1940?'1940':'1380';
         plateRects.push({verts:p.verts, w, kind});
+        let fx0=1e9,fy0=1e9,fx1=-1e9,fy1=-1e9;
+        p.verts.forEach(([wx,wy])=>{const fx=wx*frame.cc-wy*frame.ss, fy=wx*frame.ss+wy*frame.cc;
+          fx0=Math.min(fx0,fx);fy0=Math.min(fy0,fy);fx1=Math.max(fx1,fx);fy1=Math.max(fy1,fy);});
+        framePlates.push({x:fx0,y:fy0,w:fx1-fx0,h:fy1-fy0});
       });
-      return {m2:Math.round(m2*10)/10, plates:plates.length, byWidth:byW, plateRects};
+      return {m2:Math.round(m2*10)/10, plates:plates.length, byWidth:byW, plateRects, frame, framePlates,
+        pieces:plates.map(p=>({w:p.widthMM/1000,h:(p.heightMM||870)/1000}))};
     }
-    return {m2:0,plates:0,byWidth:{}};
+    return {m2:0,plates:0,byWidth:{},pieces:[]};
   }
   // PV*Sol / fallback: fill remaining roof area ROW BY ROW with the 3 Aura widths
   // (2770/1940/1380, largest first, remainder cut to >=400mm). Also counts vertical
@@ -541,22 +551,30 @@ function auraForBuilding(b){
   for(let y=anchor+ROW; y<=modTop+0.02; y+=ROW) rowYs.push(y);
 
   const framePlates=[]; // {x,y,w,h} im Rotationsrahmen — Basis für den Aura-Editor
-  // Run NUR mit Standardbreiten füllen (grösste zuerst; 2770 = zwei 1380-Spalten inkl.
-  // Fuge, Stösse folgen damit dem Modulraster, weil Runs an Modulkanten beginnen/enden).
-  // Was keine Standardplatte fasst, bleibt offen — Sonderfälle setzt der Anwender im
-  // Aura-Editor („Aura bearbeiten").
+  // Intelligente Auffüllung: Standardbreiten zuerst (grösste zuerst, Stösse folgen dem
+  // Modulraster, weil Runs an Modul-/Störflächenkanten beginnen/enden). Bliebe ein Rest
+  // <400 mm, wird stattdessen EIN Zuschnitt über die ganze Restbreite gesetzt — Lücken
+  // bleiben nur, wo weniger als 400 mm Platz ist. Die Bestellung (orderAuraPieces)
+  // schneidet Zuschnitte aus möglichst wenigen Rohlingen (Abschnitt-Wiederverwendung).
   function fillRun(a,bb,yb,nRef){
     let cx=a; let guard=0;
-    while(guard++<80){
+    while(bb-cx>=MINW && guard++<80){
       const w=bb-cx;
       let std=null;
-      for(const s of [2.77,1.94,1.38]){ if(s<=w+0.06){ std=s; break; } }
-      if(std==null) break;
-      const k=std===2.77?'2770':std===1.94?'1940':'1380';
-      byWidth[std===2.77?2770:std===1.94?1940:1380]++;
-      plateRects.push({verts:[[cx,yb],[cx+std,yb],[cx+std,yb+PH],[cx,yb+PH]].map(inv),w:Math.round(std*1000),kind:k});
-      framePlates.push({x:cx,y:yb,w:std,h:PH});
-      cx+=std+GAP; plates++; nRef.n++;
+      for(const s of [2.77,1.94,1.38]){ if(s<=w+0.06){ const rem=w-s; if(rem<=0.06||rem>=MINW){std=s;break;} } }
+      if(std!=null){
+        const k=std===2.77?'2770':std===1.94?'1940':'1380';
+        byWidth[std===2.77?2770:std===1.94?1940:1380]++;
+        plateRects.push({verts:[[cx,yb],[cx+std,yb],[cx+std,yb+PH],[cx,yb+PH]].map(inv),w:Math.round(std*1000),kind:k});
+        framePlates.push({x:cx,y:yb,w:std,h:PH});
+        cx+=std+GAP; plates++; nRef.n++;
+      } else {
+        const cw=Math.min(w,2.77);
+        byWidth.cut++; cutWidths.push(Math.round(cw*1000));
+        plateRects.push({verts:[[cx,yb],[cx+cw,yb],[cx+cw,yb+PH],[cx,yb+PH]].map(inv),w:Math.round(cw*1000),kind:'cut'});
+        framePlates.push({x:cx,y:yb,w:cw,h:PH});
+        cx+=cw+GAP; plates++; nRef.n++;
+      }
     }
   }
   rowYs.forEach(yb=>{
@@ -570,7 +588,7 @@ function auraForBuilding(b){
     }
     if(cur)runs.push(cur);
     runs.forEach(run=>{
-      if(run[1]-run[0]<1.38-0.06) return;
+      if(run[1]-run[0]<MINW) return;
       const leftMod  = isMod(run[0]-EDGE, yc);
       const rightMod = isMod(run[1]+EDGE, yc);
       const nRef={n:0};
@@ -580,7 +598,7 @@ function auraForBuilding(b){
       if(rightMod) fug++;
     });
   });
-  return {m2:Math.round(m2*10)/10, plates, byWidth, auraFugen:fug, plateRects, cutWidths, frame:{cc,ss}, framePlates};
+  return {m2:Math.round(m2*10)/10, plates, byWidth, auraFugen:fug, plateRects, cutWidths, frame:{cc,ss}, framePlates, pieces:framePlates};
 }
 
 /* ---- Aura: Nutzer-Layout (Editor / „Aura"-Layer-Import) ---- */
@@ -617,7 +635,34 @@ function auraFromUser(b){
     if(isModW(inv([p.x-0.06,yMid]))) fug++;
     if(isModW(inv([p.x+p.w+0.06,yMid]))) fug++;
   });
-  return {m2:Math.round(m2*10)/10, plates:u.plates.length, byWidth, auraFugen:fug, plateRects, cutWidths, frame:u.frame, framePlates:u.plates, user:true};
+  return {m2:Math.round(m2*10)/10, plates:u.plates.length, byWidth, auraFugen:fug, plateRects, cutWidths, frame:u.frame, framePlates:u.plates, pieces:u.plates, user:true};
+}
+
+/* ---- Bestellung: verbaute Teilstücke -> möglichst wenige Rohlinge ----
+   - Standardbreite, volle Höhe: 1 Rohling je Stück.
+   - Zuschnittbreiten (volle Höhe): nebeneinander aus einem Rohling schneiden
+     (Bin-Packing, 10 mm Sägefuge) — Abschnitte werden wiederverwendet.
+   - Höhenreduzierte Stücke (<=440 mm): zwei übereinander aus einem Rohling
+     gleicher Breitenklasse. Aufsteckprofil/Auflager zählen trotzdem JE Teilstück. */
+function orderAuraPieces(pieces){
+  const order={1380:0,1940:0,2770:0}; let reuse=0; const KERF=0.01;
+  const STD=[1.38,1.94,2.77];
+  const bucket=w=>{const s=STD.find(v=>w<=v+0.06)||2.77;return s===2.77?2770:s===1.94?1940:1380;};
+  const fullH=[],lowH=[];
+  (pieces||[]).forEach(p=>{(p.h>0.44?fullH:lowH).push(p);});
+  const cutW=[];
+  fullH.forEach(p=>{const s=STD.find(v=>Math.abs(p.w-v)<=0.06);if(s)order[s===2.77?2770:s===1.94?1940:1380]++;else cutW.push(p.w);});
+  cutW.sort((a,b)=>b-a);
+  const bins=[];
+  cutW.forEach(w=>{
+    const bin=bins.find(b=>b.rem>=w+KERF);
+    if(bin){bin.rem-=w+KERF;reuse++;}
+    else{const cap=STD.find(v=>v>=w-0.001)||2.77;bins.push({rem:cap-w});order[cap===2.77?2770:cap===1.94?1940:1380]++;}
+  });
+  const grp={};
+  lowH.forEach(p=>{const b=bucket(p.w);(grp[b]=grp[b]||0);grp[b]++;});
+  Object.entries(grp).forEach(([b,n])=>{order[b]+=Math.ceil(n/2);reuse+=Math.floor(n/2);});
+  return {order,reuse};
 }
 
 /* ---- edge candidates from carrier planes ---- */
@@ -754,13 +799,24 @@ function compute(){
   const rT20=row('','Holzschraube T20 für Fugenprofil Stahl A2',{art:'8001608',dim:'4,8×30 mm',unit:'Stk',pack:'250er'});
   // verbaut detail (informativ)
   const rVerb=row('','— Aura verbaut inkl. Randzuschnitte (informativ)',{dim:'',unit:'Stk'});
+  const rReu=row('','— davon aus Abschnitten gedeckt (informativ)',{dim:'',unit:'Stk'});
   const rVm=row('','— Restfläche Aura',{dim:'',unit:'m²'});
   S.buildings.forEach(b=>{
     const a=aura[b.name];
     // First plates: adaptive 2770/1940 ×Dachseiten
     let n27=0,n19=0;edges[b.name].firstLines.forEach(L=>{const t=tileFirst(L);n27+=t.n27;n19+=t.n19;});
     rFP27.perB[b.name]=n27*fseiten; rFP19p.perB[b.name]=n19*fseiten;
-    if(a.byWidth){
+    if(a.pieces && a.pieces.length){
+      // Bestellung aus Teilstücken: Zuschnitte werden aus möglichst wenigen Rohlingen
+      // geschnitten (Abschnitt-Wiederverwendung, inkl. Höhenteilung <=440 mm)
+      const opt=orderAuraPieces(a.pieces);
+      rO27.perB[b.name]=opt.order[2770]; rO19.perB[b.name]=opt.order[1940]; rO13.perB[b.name]=opt.order[1380];
+      rVerb.perB[b.name]=a.plates; rReu.perB[b.name]=opt.reuse; rVm.perB[b.name]=a.m2;
+      // Zubehör JE verbautem Teilstück (auch wenn 2 Stücke aus 1 Rohling kommen)
+      rAP.perB[b.name]=a.plates; // 1 Aufsteckprofil je Teilstück
+      let auf=0,bef=0;a.pieces.forEach(pc=>{const pa=plattenauflager(Math.round(pc.w*1000),p.h0);auf+=pa.auf;bef+=pa.bef;});
+      rAU.perB[b.name]=auf;rAH.perB[b.name]=bef;
+    } else if(a.byWidth){
       const opt=optimizeAura(a.byWidth, a.cutWidths||[]);
       rO27.perB[b.name]=opt.order[2770]; rO19.perB[b.name]=opt.order[1940]; rO13.perB[b.name]=opt.order[1380];
       rVerb.perB[b.name]=a.plates; rVm.perB[b.name]=a.m2;
@@ -886,7 +942,7 @@ function onParsed(resolved){
   S.assign={};S.assignSnow={};S.drawnEdges=[];
   // Layer „Aura" (DXF/DWG): geschlossene Polylinien = vom Anwender gezeichnetes
   // Platten-Layout -> als Nutzer-Layout übernehmen (hat Vorrang vor der Automatik)
-  S.auraUser=null; S.auraSel=null; S.auraImported=0;
+  S.auraUser=null; S.auraSel=null; S.auraAnchor=null; S.auraImported=0;
   const auraLay=Object.keys(byL).find(k=>k.toLowerCase()==='aura');
   if(auraLay){
     const polys=byL[auraLay].filter(e=>e.verts&&e.verts.length>=4).map(e=>e.verts);
@@ -912,7 +968,31 @@ function onParsed(resolved){
   return {ok:true};
 }
 
-window.__SUN={S,EDGE_TYPES,parse:onParsed,compute,nearestBuilding,centroid,polyLen,H,mid,userOverrideTypes,buildingFrame,render:function(){}};
+/* ---- mehrere Dächer/Dateien zu EINEM Objekt zusammenführen ----
+   Jede Datei wird mit 8 m Abstand rechts neben die vorige gelegt; die Gebäude-
+   Erkennung (clusterBuildings) trennt die Dächer dann automatisch als H1, H2, …
+   und die Materialliste zeigt Spalten je Gebäude plus Gesamtsumme. */
+function parseProjects(projects){
+  const comb=[],aura=[],roofs=[];
+  let cursor=null;
+  projects.forEach(pr=>{
+    let x0=1e9,x1=-1e9;
+    const eat=v=>v.forEach(([x])=>{x0=Math.min(x0,x);x1=Math.max(x1,x);});
+    pr.resolved.forEach(e=>eat(e.verts));
+    (pr.sptRoofs||[]).forEach(r=>eat(r.verts));
+    if(x0>x1) return;
+    const dx=(cursor==null)?0:(cursor+8-x0);
+    cursor=(cursor==null)?x1:(cursor+8+(x1-x0));
+    const off=v=>v.map(([x,y])=>[x+dx,y]);
+    pr.resolved.forEach(e=>comb.push({layer:e.layer,verts:off(e.verts),modType:e.modType,name:e.name}));
+    (pr.sptAura||[]).forEach(p2=>aura.push({widthMM:p2.widthMM,heightMM:p2.heightMM,verts:off(p2.verts)}));
+    (pr.sptRoofs||[]).forEach(r=>roofs.push({verts:off(r.verts),pitch:r.pitch,ridge:r.ridge?off(r.ridge):null}));
+  });
+  window.__SPT_AURA=aura;window.__SPT_ROOFS=roofs;
+  return onParsed(comb);
+}
+
+window.__SUN={S,EDGE_TYPES,parse:onParsed,parseProjects,compute,nearestBuilding,centroid,polyLen,H,mid,userOverrideTypes,buildingFrame,render:function(){}};
 })();
 
 </script>
@@ -939,10 +1019,14 @@ drop.addEventListener('click',()=>file.click());
 drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('over');});
 drop.addEventListener('dragleave',()=>drop.classList.remove('over'));
 drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('over');if(e.dataTransfer.files[0])loadFile(e.dataTransfer.files[0]);});
-file.addEventListener('change',e=>{if(e.target.files[0])loadFile(e.target.files[0]);});
+file.addEventListener('change',e=>{if(e.target.files[0]){loadFile(e.target.files[0]);e.target.value='';}});
+// „+ Dach hinzufügen": nächste Datei wird zum Projekt DAZUgeladen statt es zu ersetzen
+const addRoof=$('#addroof');
+if(addRoof)addRoof.addEventListener('click',()=>{St().mergeNext=true;file.click();});
 
 function loadFile(f){
   const info=$('#parseinfo');info.style.display='block';info.className='note';info.innerHTML='Lese '+f.name+' …';
+  const merge=!!St().mergeNext; St().mergeNext=false; // „+ Dach hinzufügen"
   if(/\.dwg$/i.test(f.name)){
     const r=new FileReader();
     r.onload=async()=>{
@@ -950,7 +1034,7 @@ function loadFile(f){
         if(!window.__readDWG){info.className='note warn';info.innerHTML='<b>DWG-Modul lädt noch.</b> Kurz warten und erneut versuchen.';return;}
         info.innerHTML='Lese DWG (SPT) – einen Moment …';
         const resolved=await window.__readDWG(r.result);
-        finishParse(resolved,f,info);
+        finishParse(resolved,f,info,merge);
       }catch(err){info.className='note warn';info.innerHTML='<b>Fehler beim DWG-Lesen.</b> '+err.message;console.error(err);}
     };
     r.readAsArrayBuffer(f);
@@ -958,19 +1042,23 @@ function loadFile(f){
   }
   const r=new FileReader();
   r.onload=()=>{setTimeout(()=>{
-    try{ window.__SPT_AURA=[]; window.__SPT_ROOFS=[]; finishParse(window.__parseDXF(r.result),f,info); }
+    try{ window.__SPT_AURA=[]; window.__SPT_ROOFS=[]; finishParse(window.__parseDXF(r.result),f,info,merge); }
     catch(err){info.className='note warn';info.innerHTML='<b>Fehler.</b> '+err.message;console.error(err);}
   },20);};
   r.readAsText(f);
 }
-function finishParse(resolved,f,info){
-  const res=A().parse(resolved);
-  if(!res.ok){info.className='note warn';info.innerHTML='<b>Datei nicht lesbar.</b> '+res.msg;return;}
+function finishParse(resolved,f,info,merge){
+  const S0=St();
+  const proj={name:f.name,resolved,sptAura:(window.__SPT_AURA||[]).slice(),sptRoofs:(window.__SPT_ROOFS||[]).slice()};
+  if(merge && S0.projects && S0.projects.length) S0.projects.push(proj); else S0.projects=[proj];
+  const res=A().parseProjects(S0.projects);
+  if(!res.ok){info.className='note warn';info.innerHTML='<b>Datei nicht lesbar.</b> '+res.msg;if(merge)S0.projects.pop();return;}
   const S=St();
   const auraNote=S.sptAura&&S.sptAura.length?` · ${S.sptAura.length} Aura-Platten (SPT)`:'';
   const auraImp=S.auraImported?` · <b>Aura-Layout aus Datei übernommen (${S.auraImported} Platten)</b>`:'';
+  const nFiles=S.projects.length>1?` (${S.projects.length} Dateien: ${S.projects.map(p2=>p2.name).join(', ')})`:'';
   info.className='note';
-  info.innerHTML=`<b>${f.name}</b> · ${S.mods.length} Module · ${S.buildings.length} Gebäude · `+
+  info.innerHTML=`<b>${f.name}</b>${nFiles} · ${S.mods.length} Module · ${S.buildings.length} Gebäude · `+
     `${S.edgeCands.length} Kanten (${S.edgeCands.filter(e=>e.interior).length} innere)${auraNote}${auraImp} · Layer: ${edgeSummary()}`;
   buildParams();A().compute();renderAll();setStep(2);
 }
@@ -1057,10 +1145,12 @@ function buildPalette(){
     const add=el('button','edgebtn','+ Platte');
     add.onclick=()=>{
       auraEnsureUser();
-      const bn=S.activeBuilding!=='ALL'?S.activeBuilding:A().nearestBuilding(S2W(VIEW.W/2,VIEW.H/2));
+      // Einfügepunkt: zuletzt geklickter Ort (×-Markierung, CAD-Prinzip), sonst Gebäudemitte
+      const anchor=S.auraAnchor||null;
+      const bn=anchor?A().nearestBuilding(anchor):(S.activeBuilding!=='ALL'?S.activeBuilding:A().nearestBuilding(S2W(VIEW.W/2,VIEW.H/2)));
       const b=S.buildings.find(x=>x.name===bn);
       const u=S.auraUser[bn]; if(!u||!b)return;
-      const f=auraW2F(u,b.cx,b.cy); // Gebäudemitte — immer auf dem Dach sichtbar
+      const f=anchor?auraW2F(u,anchor[0],anchor[1]):auraW2F(u,b.cx,b.cy);
       u.plates.push({x:Math.round((f[0]-0.69)*100)/100, y:Math.round((f[1]-0.435)*100)/100, w:1.38, h:0.87});
       S.auraSel={b:bn,i:u.plates.length-1};
       A().compute();renderAll();
@@ -1079,7 +1169,7 @@ function buildPalette(){
   }
   $('#editorhint').textContent = S.activeTool==='__draw'
     ? 'Freihand: Startpunkt klicken, dann Endpunkt. Wird als '+(ET()[S.drawType]||{label:''}).label+' gezählt.'
-    : (S.activeTool==='__aura' ? 'Platte anklicken und ziehen = verschieben · an einer Kante ziehen = Breite/Höhe ändern (rastet auf 1380/1940/2770 und Modulkanten) · „+ Platte" fügt hinzu, Entf löscht · „Auto-Layout" verwirft die manuellen Änderungen.'
+    : (S.activeTool==='__aura' ? 'Platte ziehen = verschieben · Kante ziehen = Breite/Höhe (rastet auf 1380/1940/2770, Modul- und Störflächenkanten) · Klick auf leere Fläche setzt den Einfügepunkt (×), „+ Platte" erzeugt die Platte dort · Entf löscht · „Auto-Layout" verwirft die manuellen Änderungen.'
     : (S.activeTool==='Schneefang' ? 'Klicke Kanten an, um Schneefang zu setzen (zusätzlich zu Traufe möglich). Manuelle Markierung ersetzt die automatische Schneefang-Erkennung.'
     : (S.activeTool ? 'Klicke Kanten an, um sie als '+ET()[S.activeTool].label+' zu markieren.' : 'Wähle oben einen Kanten-Typ, dann klicke Kanten auf dem Plan an.')));
 }
@@ -1191,6 +1281,12 @@ function drawPlan(){
     });
     ctx.textAlign='start';ctx.textBaseline='alphabetic';
   }
+  // Aura-Editor: Einfügepunkt (×) am zuletzt geklickten Ort
+  if(auraEdit && S.auraAnchor){
+    const[X,Y]=W2S(S.auraAnchor[0],S.auraAnchor[1]);
+    ctx.strokeStyle='#c0392b';ctx.lineWidth=2;ctx.setLineDash([]);
+    ctx.beginPath();ctx.moveTo(X-6,Y-6);ctx.lineTo(X+6,Y+6);ctx.moveTo(X-6,Y+6);ctx.lineTo(X+6,Y-6);ctx.stroke();
+  }
   // Aura-Editor: Breitenlabels auf allen Platten, Auswahl mit Rahmen + Griffen + Massen
   if(auraEdit){
     ctx.textAlign='center';ctx.textBaseline='middle';
@@ -1270,16 +1366,18 @@ function auraHit(sx,sy){
   }
   return null;
 }
-// Snap-Kandidaten: Modulkanten + Kanten der anderen Platten (im Rahmen)
+// Snap-Kandidaten: Modulkanten + Störflächenkanten + Kanten der anderen Platten (im Rahmen)
 function auraSnapCands(bn){
   const S=St(); const u=S.auraUser[bn];
   const b=S.buildings.find(x=>x.name===bn);
   const xs=[],ys=[];
-  (b?b.mods:[]).forEach(m=>{
+  const addBox=verts=>{
     let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
-    m.v.forEach(([wx,wy])=>{const[fx,fy]=auraW2F(u,wx,wy);x0=Math.min(x0,fx);y0=Math.min(y0,fy);x1=Math.max(x1,fx);y1=Math.max(y1,fy);});
+    verts.forEach(([wx,wy])=>{const[fx,fy]=auraW2F(u,wx,wy);x0=Math.min(x0,fx);y0=Math.min(y0,fy);x1=Math.max(x1,fx);y1=Math.max(y1,fy);});
     xs.push(x0,x1);ys.push(y0,y1);
-  });
+  };
+  (b?b.mods:[]).forEach(m=>addBox(m.v));
+  (S.barred||[]).forEach(v=>addBox(v)); // Störflächen: Platten docken auch hier an
   u.plates.forEach((p,i)=>{ if(S.auraSel&&S.auraSel.b===bn&&S.auraSel.i===i)return; xs.push(p.x,p.x+p.w);ys.push(p.y,p.y+p.h); });
   return {xs,ys};
 }
@@ -1369,7 +1467,12 @@ function setupCanvas(){
   cv.addEventListener('click',ev=>{
     const S=St();if(dragMoved){dragMoved=false;return;} // ignore clicks that were drags
     if(!S.activeTool)return;
-    if(S.activeTool==='__aura')return; // Auswahl/Bearbeitung läuft über mousedown/-move
+    if(S.activeTool==='__aura'){
+      // Klick auf leere Fläche = Einfügepunkt setzen (×), dort erzeugt „+ Platte" die Platte
+      const[ax,ay]=canvasXY(ev);
+      if(!auraHit(ax,ay)){ S.auraAnchor=S2W(ax,ay); drawPlan(); }
+      return;
+    }
     const[sx,sy]=canvasXY(ev);
     if(S.activeTool==='__draw'){
       const w=S2W(sx,sy);
