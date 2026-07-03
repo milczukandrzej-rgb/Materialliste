@@ -178,6 +178,45 @@ function mapSPT(entities, blockOrigin){
   return {resolved:out, auraPlates, roofs};
 }
 
+/* ---- Generischer DWG-Fallback (kein SPT-Export) ----
+   z. B. eine in CAD nachbearbeitete PV*Sol-Zeichnung, in der jede Ebene als
+   Block-INSERT am Ursprung liegt (ODA-Resave). Explodiert Modelspace-INSERTs
+   über die BLOCK_RECORD-Tabelle und erkennt die Zeichnungseinheit über die
+   Modul-Langkante (PV*Sol-DXF = Meter, Resaves oft ×10/×100/×1000). */
+function mapGeneric(db){
+  const out=[];
+  const recs=(db.tables&&db.tables.BLOCK_RECORD&&db.tables.BLOCK_RECORD.entries)||[];
+  const blocks={}; recs.forEach(b=>{ blocks[b.name]=b.entities||[]; });
+  const pv=e=>{
+    if(e.vertices&&e.vertices.length) return e.vertices.map(p=>[p.x,p.y]);
+    if(e.startPoint&&e.endPoint) return [[e.startPoint.x,e.startPoint.y],[e.endPoint.x,e.endPoint.y]];
+    return null;
+  };
+  (db.entities||[]).forEach(e=>{
+    if(e.type==='INSERT' && blocks[e.name]){
+      const ip=e.insertionPoint||{x:0,y:0};
+      const rot=e.rotation||0, c=Math.cos(rot), s=Math.sin(rot);
+      const sx=(e.scaleFactor&&e.scaleFactor.x)||1, sy=(e.scaleFactor&&e.scaleFactor.y)||1;
+      blocks[e.name].forEach(be=>{
+        if(!/POLYLINE/.test(be.type)) return;
+        const v=pv(be); if(!v||v.length<2) return;
+        out.push({layer:e.layer, verts:v.map(([x,y])=>{const X=x*sx,Y=y*sy;return [ip.x+X*c-Y*s, ip.y+X*s+Y*c];})});
+      });
+    } else if(/POLYLINE|LINE/.test(e.type)){
+      const v=pv(e); if(v&&v.length>=2) out.push({layer:e.layer, verts:v});
+    }
+  });
+  // Einheiten-Erkennung: Median der längsten Kante der MODULES-Polygone -> ~1.38/1.94/1.01 m
+  const modPolys=out.filter(o=>o.layer&&o.layer.toUpperCase()==='MODULES'&&o.verts.length>=4);
+  if(!modPolys.length) return out;
+  const longs=modPolys.map(o=>{let b=0;const v=o.verts;for(let i=0;i<v.length-1;i++){const l=Math.hypot(v[i+1][0]-v[i][0],v[i+1][1]-v[i][1]);if(l>b)b=l;}return b;}).sort((a,b)=>a-b);
+  const med=longs[Math.floor(longs.length/2)];
+  let scale=1,bd=1e18;
+  [1,0.1,0.01,0.001].forEach(f=>{[1.38,1.94,1.01].forEach(t=>{const d=Math.abs(med*f-t);if(d<bd){bd=d;scale=f;}});});
+  if(scale!==1) out.forEach(o=>{o.verts=o.verts.map(([x,y])=>[x*scale,y*scale]);});
+  return out;
+}
+
 window.__readDWG = async function(arrayBuffer){
   const L=await getLib();
   const dwg=L.dwg_read_data(arrayBuffer, Dwg_File_Type.DWG);
@@ -196,6 +235,17 @@ window.__readDWG = async function(arrayBuffer){
     });
   }catch(e){}
   const {resolved, auraPlates, roofs}=mapSPT(ents, blockOrigin);
+  // Kein SPT-Export (keine Modules-INSERTs)? -> generischer Fallback (z. B. in CAD
+  // nachbearbeitete PV*Sol-Zeichnung mit Layern MODULES/MODULAREA/Aura als Blöcke).
+  if(!resolved.some(e=>e.layer==='MODULES')){
+    const gen=mapGeneric(db);
+    if(gen.some(e=>e.layer&&e.layer.toUpperCase()==='MODULES')){
+      gen.forEach(e=>{ if(e.layer.toUpperCase()==='MODULES') e.layer='MODULES'; if(e.layer.toUpperCase()==='MODULAREA') e.layer='MODULAREA'; });
+      window.__SPT_AURA = [];
+      window.__SPT_ROOFS = [];
+      return gen;
+    }
+  }
   window.__SPT_AURA = auraPlates;
   window.__SPT_ROOFS = roofs;
   return resolved;
