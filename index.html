@@ -371,6 +371,7 @@ const S = {
   assign:{},           // id -> type  (First/Traufe/Ort/Grat/Kehle)
   assignSnow:{},       // id -> true  (Schneefang, zusätzlich zum Kantentyp möglich)
   drawnEdges:[],       // free-drawn {a,b,len,type}
+  auraUser:null,       // Nutzer-Aura-Layout: {gebäude:{frame:{cc,ss},plates:[{x,y,w,h}]}}
   params:{ h0:1000, neigung:12, ortVariante:'seitenanschluss', firstVariante:'standard', firstSeiten:2, auraGlobal:true, schneefang:false },
   activeBuilding:'ALL', activeTool:null, result:null
 };
@@ -514,22 +515,17 @@ function auraForBuilding(b){
   function onRoof(x,y){return carrR.some(c=>pointInPoly([x,y],c));}
   function isMod(x,y){return modR.some(m=>pointInPoly([x,y],m));}
   function isBar(x,y){return barR.some(z=>pointInPoly([x,y],z));}
-  function freeAt(x,y){return onRoof(x,y)&&!isMod(x,y)&&!isBar(x,y);}
-  // frei über die GANZE Plattenhöhe (unten/Mitte/oben, LAP = konstruktive 90-mm-Überdeckung).
-  // Nur die Mittellinie zu testen liess Platten über Störflächen und die schräge Dachkante
-  // ragen, wenn diese nur oben/unten in die Zeile hineinreichen.
+  // frei über die GANZE Plattenhöhe: Dachkante/Module strikt (LAP = konstruktive
+  // 90-mm-Überdeckung) — nichts ragt über die Dachkante oder in Module. Störflächen
+  // blockieren nur die eigene Zeile (Mittellinie): ober-/unterhalb sitzen volle
+  // Platten, die vor Ort um die Störfläche herum zugeschnitten werden.
   function freeBand(x,yb){
-    const ys=[yb+LAP, yb+PH/2, yb+PH-LAP];
-    for(const y of ys){ if(!onRoof(x,y)||isMod(x,y)||isBar(x,y)) return false; }
-    return true;
+    const ysR=[yb+LAP, yb+PH/2, yb+PH-LAP];
+    for(const y of ysR){ if(!onRoof(x,y)||isMod(x,y)) return false; }
+    return !isBar(x,yb+PH/2);
   }
 
   // --- module raster anchors (rotated frame) ---
-  // vertical column edges (left/right x of each module)
-  const colEdges=[];
-  modR.forEach(m=>{let mnx=1e9,mxx=-1e9;m.forEach(([x])=>{mnx=Math.min(mnx,x);mxx=Math.max(mxx,x);});colEdges.push(mnx,mxx);});
-  colEdges.sort((a,b)=>a-b);
-  const grid=[];colEdges.forEach(e=>{if(!grid.length||Math.abs(e-grid[grid.length-1])>SNAP)grid.push(e);});
   // horizontal row band bottoms (module bottom y), deduped to ROW pitch
   const rowBottoms=[];
   modR.forEach(m=>{let mny=1e9;m.forEach(([,y])=>{mny=Math.min(mny,y);});rowBottoms.push(mny);});
@@ -544,39 +540,24 @@ function auraForBuilding(b){
   for(let y=anchor; y>=y0-ROW; y-=ROW) rowYs.unshift(y);
   for(let y=anchor+ROW; y<=modTop+0.02; y+=ROW) rowYs.push(y);
 
-  function classify(w){ for(const s of [1.38,1.94,2.77]) if(Math.abs(w-s)<=0.06) return {w:s,kind:s===2.77?'2770':s===1.94?'1940':'1380'}; return null; }
-  // fill a single free segment [a,bb] at row bottom yb, snapping joints to the module column grid.
-  // hV (optional): {y0,h} = reduzierte Plattenhöhe fürs Layout (Störflächen-/Kantenzone);
-  // die Materialzählung (Zuschnitt aus Standardplatte) bleibt gleich.
-  function fillSegment(a,bb,yb,nRef,hV){
-    const ry=hV?hV.y0:yb, rh=hV?hV.h:PH;
-    const rect=(x,w)=>({verts:[[x,ry],[x+w,ry],[x+w,ry+rh],[x,ry+rh]].map(inv),w:Math.round(w*1000)});
+  const framePlates=[]; // {x,y,w,h} im Rotationsrahmen — Basis für den Aura-Editor
+  // Run NUR mit Standardbreiten füllen (grösste zuerst; 2770 = zwei 1380-Spalten inkl.
+  // Fuge, Stösse folgen damit dem Modulraster, weil Runs an Modulkanten beginnen/enden).
+  // Was keine Standardplatte fasst, bleibt offen — Sonderfälle setzt der Anwender im
+  // Aura-Editor („Aura bearbeiten").
+  function fillRun(a,bb,yb,nRef){
     let cx=a; let guard=0;
-    while(bb-cx>=MINW && guard++<50){
+    while(guard++<80){
       const w=bb-cx;
-      const cl=classify(w);
-      if(cl && w<=2.77+0.06){ // whole remaining segment is ~a standard plate
-        byWidth[cl.kind==='2770'?2770:cl.kind==='1940'?1940:1380]++;
-        plateRects.push(Object.assign(rect(cx,cl.w),{kind:hV?'cut':cl.kind}));
-        cx+=cl.w+GAP; plates++; nRef.n++; continue;
-      }
-      // choose the largest standard that leaves either 0 or >=MINW remainder
-      let chosen=null;
-      for(const s of [2.77,1.94,1.38]){ if(s<=w+0.06){ const rem=w-s; if(rem<=0.06||rem>=MINW){chosen=s;break;} } }
-      if(chosen!=null){
-        const k=chosen===2.77?'2770':chosen===1.94?'1940':'1380';byWidth[chosen===2.77?2770:chosen===1.94?1940:1380]++;
-        plateRects.push(Object.assign(rect(cx,chosen),{kind:hV?'cut':k}));
-        cx+=chosen+GAP; plates++; nRef.n++;
-      } else {
-        // kein Standard passt sauber (Rest wäre <400 mm) -> EINE breitere Zuschnittplatte
-        // über die ganze Restbreite (PV*Sol-Stil), statt Standardplatte + verworfener Lücke
-        const cw=Math.min(w,2.77);
-        byWidth.cut++; cutWidths.push(Math.round(cw*1000));
-        plateRects.push(Object.assign(rect(cx,cw),{kind:'cut'}));
-        cx=bb; plates++; nRef.n++;
-      }
+      let std=null;
+      for(const s of [2.77,1.94,1.38]){ if(s<=w+0.06){ std=s; break; } }
+      if(std==null) break;
+      const k=std===2.77?'2770':std===1.94?'1940':'1380';
+      byWidth[std===2.77?2770:std===1.94?1940:1380]++;
+      plateRects.push({verts:[[cx,yb],[cx+std,yb],[cx+std,yb+PH],[cx,yb+PH]].map(inv),w:Math.round(std*1000),kind:k});
+      framePlates.push({x:cx,y:yb,w:std,h:PH});
+      cx+=std+GAP; plates++; nRef.n++;
     }
-    // leftover < MINW that is still >0: a thin cut plate only if >= MINW (else dropped as <400 strip)
   }
   rowYs.forEach(yb=>{
     const yc=yb+PH/2;
@@ -589,51 +570,54 @@ function auraForBuilding(b){
     }
     if(cur)runs.push(cur);
     runs.forEach(run=>{
-      if(run[1]-run[0]<MINW) return;
+      if(run[1]-run[0]<1.38-0.06) return;
       const leftMod  = isMod(run[0]-EDGE, yc);
       const rightMod = isMod(run[1]+EDGE, yc);
-      // split the run at module column edges that fall inside it -> aura joints align with modules
-      const cuts=grid.filter(g=>g>run[0]+MINW*0.5 && g<run[1]-MINW*0.5);
-      let segs=[]; let prev=run[0];
-      cuts.forEach(g=>{ segs.push([prev,g]); prev=g; });
-      segs.push([prev,run[1]]);
-      // merge thin segments (<0.95m, i.e. would force a small offcut) into a neighbour so a
-      // single wider plate spans the obstacle edge — matches PV*Sol's wider cuts near Störflächen
-      for(let i=0;i<segs.length;i++){
-        const wdt=segs[i][1]-segs[i][0];
-        if(wdt<0.95 && segs.length>1){
-          if(i<segs.length-1){ segs[i+1][0]=segs[i][0]; segs.splice(i,1); i--; }
-          else { segs[i-1][1]=segs[i][1]; segs.splice(i,1); i--; }
-        }
-      }
       const nRef={n:0};
-      segs.forEach(([a,bb])=>{ if(bb-a>=MINW) fillSegment(a,bb,yb,nRef); });
+      fillRun(run[0],run[1],yb,nRef);
       fug += Math.max(nRef.n-1,0);
       if(leftMod)  fug++;
       if(rightMod) fug++;
     });
-    // Pass 2: Mittellinie frei, aber volle Plattenhöhe blockiert (Störfläche oder Dachkante
-    // ragt in die Zeile) -> höhenreduzierte Zuschnittplatten, wie PV*Sol sie dort setzt.
-    const runs2=[]; cur=null;
-    for(let x=x0; x<=x1; x+=STEP){
-      if(!freeBand(x,yb) && freeAt(x,yc)){ if(!cur)cur=[x,x]; else cur[1]=x; }
-      else { if(cur){runs2.push(cur);cur=null;} }
-    }
-    if(cur)runs2.push(cur);
-    runs2.forEach(run=>{
-      if(run[1]-run[0]<MINW) return;
-      // freie Höhe in der Mitte des Runs ermitteln (Intervall um die Mittellinie)
-      const xm=(run[0]+run[1])/2;
-      let ylo=yc, yhi=yc;
-      while(ylo-0.03>=yb    && freeAt(xm,ylo-0.03)) ylo-=0.03;
-      while(yhi+0.03<=yb+PH && freeAt(xm,yhi+0.03)) yhi+=0.03;
-      if(yhi-ylo<0.25) return; // zu schmaler Streifen
-      const nRef={n:0};
-      fillSegment(run[0],run[1],yb,nRef,{y0:ylo,h:yhi-ylo});
-      fug += Math.max(nRef.n-1,0);
-    });
   });
-  return {m2:Math.round(m2*10)/10, plates, byWidth, auraFugen:fug, plateRects, cutWidths};
+  return {m2:Math.round(m2*10)/10, plates, byWidth, auraFugen:fug, plateRects, cutWidths, frame:{cc,ss}, framePlates};
+}
+
+/* ---- Aura: Nutzer-Layout (Editor / „Aura"-Layer-Import) ---- */
+function buildingFrame(b){
+  const angs=b.mods.map(m=>((longEdge(m.v).ang%Math.PI)+Math.PI)%Math.PI);angs.sort((x,y)=>x-y);
+  const dom=angs.length?angs[Math.floor(angs.length/2)]:0;
+  return {cc:Math.cos(-dom), ss:Math.sin(-dom)};
+}
+// Zählt die vom Anwender platzierten/verschobenen Platten (S.auraUser) statt des
+// Auto-Layouts. Breite -> nächste Standardbreite (±60 mm), sonst Zuschnitt.
+function auraFromUser(b){
+  const u=S.auraUser && S.auraUser[b.name];
+  if(!u) return null;
+  const {cc,ss}=u.frame;
+  const inv=([x,y])=>[x*cc+y*ss, -x*ss+y*cc];
+  const byWidth={1380:0,1940:0,2770:0,cut:0}; const cutWidths=[]; const plateRects=[];
+  let m2=0, fug=0;
+  u.plates.forEach(p=>{
+    const wmm=Math.round(p.w*1000);
+    const std=[1.38,1.94,2.77].find(s=>Math.abs(p.w-s)<=0.06);
+    let kind;
+    if(std){ const k=std===2.77?2770:std===1.94?1940:1380; byWidth[k]++; kind=String(k); }
+    else { byWidth.cut++; cutWidths.push(wmm); kind='cut'; }
+    m2+=p.w*p.h;
+    plateRects.push({verts:[[p.x,p.y],[p.x+p.w,p.y],[p.x+p.w,p.y+p.h],[p.x,p.y+p.h]].map(inv), w:wmm, kind});
+  });
+  // Fugen: Platten-Nachbarn in gleicher Zeile mit kleiner Fuge + Modul-Nachbarschaft
+  const mods=b.mods.map(m=>m.v);
+  const isModW=pt=>mods.some(mv=>pointInPoly(pt,mv));
+  u.plates.forEach((p,i)=>{
+    const yMid=p.y+p.h/2;
+    u.plates.forEach((q,j)=>{ if(j<=i)return;
+      if(Math.abs((q.y+q.h/2)-yMid)<0.35 && (Math.abs(q.x-(p.x+p.w))<0.05 || Math.abs(p.x-(q.x+q.w))<0.05)) fug++; });
+    if(isModW(inv([p.x-0.06,yMid]))) fug++;
+    if(isModW(inv([p.x+p.w+0.06,yMid]))) fug++;
+  });
+  return {m2:Math.round(m2*10)/10, plates:u.plates.length, byWidth, auraFugen:fug, plateRects, cutWidths, frame:u.frame, framePlates:u.plates, user:true};
 }
 
 /* ---- edge candidates from carrier planes ---- */
@@ -708,8 +692,8 @@ function compute(){
 
   // fugen from raster
   const grid={};S.buildings.forEach(b=>grid[b.name]=analyzeGrid(b));
-  // aura per building
-  const aura={};S.buildings.forEach(b=>{aura[b.name]=(p.auraGlobal&&auraAllowed(p.h0))?auraForBuilding(b):{m2:0,plates:0};});
+  // aura per building (Nutzer-Layout aus Editor/Import hat Vorrang vor der Automatik)
+  const aura={};S.buildings.forEach(b=>{aura[b.name]=(p.auraGlobal&&auraAllowed(p.h0))?(auraFromUser(b)||auraForBuilding(b)):{m2:0,plates:0};});
   // collect aura plate rectangles (for graphical layout check) + raw remaining area for validation
   S.auraRects=[]; S.auraValidation={};
   S.buildings.forEach(b=>{ const a=aura[b.name]; if(a.plateRects) S.auraRects.push(...a.plateRects);
@@ -900,13 +884,35 @@ function onParsed(resolved){
   S.sptSnow = (byL['__SNOWGUARD__']||[]).map(e=>e.verts);
   S.buildings=clusterBuildings(S.mods);
   S.assign={};S.assignSnow={};S.drawnEdges=[];
+  // Layer „Aura" (DXF/DWG): geschlossene Polylinien = vom Anwender gezeichnetes
+  // Platten-Layout -> als Nutzer-Layout übernehmen (hat Vorrang vor der Automatik)
+  S.auraUser=null; S.auraSel=null; S.auraImported=0;
+  const auraLay=Object.keys(byL).find(k=>k.toLowerCase()==='aura');
+  if(auraLay){
+    const polys=byL[auraLay].filter(e=>e.verts&&e.verts.length>=4).map(e=>e.verts);
+    if(polys.length){
+      S.auraUser={};
+      polys.forEach(v=>{
+        const bn=nearestBuilding(centroid(v));
+        const b=S.buildings.find(x=>x.name===bn);
+        if(!S.auraUser[bn]) S.auraUser[bn]={frame:buildingFrame(b), plates:[]};
+        const {cc,ss}=S.auraUser[bn].frame;
+        const fv=v.map(([x,y])=>[x*cc-y*ss, x*ss+y*cc]);
+        let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+        fv.forEach(([x,y])=>{x0=Math.min(x0,x);y0=Math.min(y0,y);x1=Math.max(x1,x);y1=Math.max(y1,y);});
+        if(x1-x0>0.1 && y1-y0>0.1) S.auraUser[bn].plates.push({x:x0,y:y0,w:x1-x0,h:y1-y0});
+      });
+      S.auraImported=Object.values(S.auraUser).reduce((a,u)=>a+u.plates.length,0);
+      if(!S.auraImported) S.auraUser=null;
+    }
+  }
   buildEdgeCandidates();
   // Schneefang erkannt (SPT-Marker oder DXF-Layer) -> Berechnung automatisch einschalten
   if((S.sptSnow&&S.sptSnow.length)||(S.preset&&S.preset.some(p=>p.type==='Schneefang')))S.params.schneefang=true;
   return {ok:true};
 }
 
-window.__SUN={S,EDGE_TYPES,parse:onParsed,compute,nearestBuilding,centroid,polyLen,H,mid,userOverrideTypes,render:function(){}};
+window.__SUN={S,EDGE_TYPES,parse:onParsed,compute,nearestBuilding,centroid,polyLen,H,mid,userOverrideTypes,buildingFrame,render:function(){}};
 })();
 
 </script>
@@ -962,9 +968,10 @@ function finishParse(resolved,f,info){
   if(!res.ok){info.className='note warn';info.innerHTML='<b>Datei nicht lesbar.</b> '+res.msg;return;}
   const S=St();
   const auraNote=S.sptAura&&S.sptAura.length?` · ${S.sptAura.length} Aura-Platten (SPT)`:'';
+  const auraImp=S.auraImported?` · <b>Aura-Layout aus Datei übernommen (${S.auraImported} Platten)</b>`:'';
   info.className='note';
   info.innerHTML=`<b>${f.name}</b> · ${S.mods.length} Module · ${S.buildings.length} Gebäude · `+
-    `${S.edgeCands.length} Kanten (${S.edgeCands.filter(e=>e.interior).length} innere)${auraNote} · Layer: ${edgeSummary()}`;
+    `${S.edgeCands.length} Kanten (${S.edgeCands.filter(e=>e.interior).length} innere)${auraNote}${auraImp} · Layer: ${edgeSummary()}`;
   buildParams();A().compute();renderAll();setStep(2);
 }
 function edgeSummary(){const L=St().layers,h=[];['First','Seitenanschlussprofil','Grat','Kehle','Schneefang'].forEach(k=>{if(L[k]&&L[k].length)h.push(k);});return h.length?h.join(', '):'keine';}
@@ -1030,6 +1037,10 @@ function buildPalette(){
   const draw=el('button','edgebtn'+(S.activeTool==='__draw'?' on':''),'✎ Freihand');
   draw.onclick=()=>{S.activeTool=(S.activeTool==='__draw'?null:'__draw');drawStart=null;buildPalette();drawPlan();};
   box.appendChild(draw);
+  const aur=el('button','edgebtn'+(S.activeTool==='__aura'?' on':''),'⬚ Aura bearbeiten');
+  aur.style.setProperty('--c','#5a7d3c');
+  aur.onclick=()=>{S.activeTool=(S.activeTool==='__aura'?null:'__aura');S.auraSel=null;drawStart=null;buildPalette();drawPlan();};
+  box.appendChild(aur);
   const clr=el('button','edgebtn ghost','✕ Auswahl löschen');
   clr.onclick=()=>{S.assign={};S.assignSnow={};S.drawnEdges=[];S.activeTool=null;drawStart=null;buildPalette();A().compute();renderAll();};
   box.appendChild(clr);
@@ -1041,10 +1052,36 @@ function buildPalette(){
     sel.onchange=()=>{S.drawType=sel.value;};
     box.appendChild(el('span',null,'&nbsp;als&nbsp;'));box.appendChild(sel);
   }
+  // Aura-Editor: Zusatzaktionen
+  if(S.activeTool==='__aura'){
+    const add=el('button','edgebtn','+ Platte');
+    add.onclick=()=>{
+      auraEnsureUser();
+      const bn=S.activeBuilding!=='ALL'?S.activeBuilding:A().nearestBuilding(S2W(VIEW.W/2,VIEW.H/2));
+      const b=S.buildings.find(x=>x.name===bn);
+      const u=S.auraUser[bn]; if(!u||!b)return;
+      const f=auraW2F(u,b.cx,b.cy); // Gebäudemitte — immer auf dem Dach sichtbar
+      u.plates.push({x:Math.round((f[0]-0.69)*100)/100, y:Math.round((f[1]-0.435)*100)/100, w:1.38, h:0.87});
+      S.auraSel={b:bn,i:u.plates.length-1};
+      A().compute();renderAll();
+    };
+    box.appendChild(add);
+    const del=el('button','edgebtn ghost','– Platte löschen');
+    del.onclick=()=>{
+      if(!S.auraSel)return;
+      const u=S.auraUser&&S.auraUser[S.auraSel.b]; if(!u)return;
+      u.plates.splice(S.auraSel.i,1);S.auraSel=null;A().compute();renderAll();
+    };
+    box.appendChild(del);
+    const rst=el('button','edgebtn ghost','↺ Auto-Layout');
+    rst.onclick=()=>{S.auraUser=null;S.auraSel=null;A().compute();renderAll();};
+    box.appendChild(rst);
+  }
   $('#editorhint').textContent = S.activeTool==='__draw'
     ? 'Freihand: Startpunkt klicken, dann Endpunkt. Wird als '+(ET()[S.drawType]||{label:''}).label+' gezählt.'
+    : (S.activeTool==='__aura' ? 'Platte anklicken und ziehen = verschieben · an einer Kante ziehen = Breite/Höhe ändern (rastet auf 1380/1940/2770 und Modulkanten) · „+ Platte" fügt hinzu, Entf löscht · „Auto-Layout" verwirft die manuellen Änderungen.'
     : (S.activeTool==='Schneefang' ? 'Klicke Kanten an, um Schneefang zu setzen (zusätzlich zu Traufe möglich). Manuelle Markierung ersetzt die automatische Schneefang-Erkennung.'
-    : (S.activeTool ? 'Klicke Kanten an, um sie als '+ET()[S.activeTool].label+' zu markieren.' : 'Wähle oben einen Kanten-Typ, dann klicke Kanten auf dem Plan an.'));
+    : (S.activeTool ? 'Klicke Kanten an, um sie als '+ET()[S.activeTool].label+' zu markieren.' : 'Wähle oben einen Kanten-Typ, dann klicke Kanten auf dem Plan an.')));
 }
 
 /* ---- building pills ---- */
@@ -1081,10 +1118,22 @@ function drawPlan(){
   S.env.forEach(v=>poly(v,'#999',null,1,[4,3]));
   // barred
   S.barred.forEach(v=>poly(v,'#bbb','rgba(180,180,180,.30)',1));
-  // computed/SPT Aura plates, colored by width (opaque so they don't bleed through modules)
-  if(S.showAura!==false && S.auraRects){
+  // computed/SPT Aura plates, colored by width (opaque so they don't bleed through modules).
+  // Im Editor-Modus live aus S.auraUser zeichnen (während des Ziehens, vor compute()).
+  const auraEdit = S.activeTool==='__aura' && S.auraUser;
+  if(S.showAura!==false){
     const ac={2770:'#7aa85a',1940:'#a7c97a',1380:'#c4dca8',cut:'#e0a046'};
-    S.auraRects.forEach(r=>poly(r.verts, 'rgba(90,110,70,.6)', ac[r.kind]||'#b4b4b4', 0.4));
+    if(auraEdit){
+      Object.keys(S.auraUser).forEach(bn=>{
+        const u=S.auraUser[bn];
+        u.plates.forEach(p=>{
+          const v=[[p.x,p.y],[p.x+p.w,p.y],[p.x+p.w,p.y+p.h],[p.x,p.y+p.h]].map(([fx,fy])=>auraF2W(u,fx,fy));
+          poly(v,'rgba(90,110,70,.6)',ac[auraKindByW(p.w)]||'#b4b4b4',0.4);
+        });
+      });
+    } else if(S.auraRects){
+      S.auraRects.forEach(r=>poly(r.verts, 'rgba(90,110,70,.6)', ac[r.kind]||'#b4b4b4', 0.4));
+    }
   }
   // modules (opaque, drawn on top of aura)
   const col={L:'#1b4f9c',M:'#3a74c4',XL:'#0e3a78'};
@@ -1142,6 +1191,33 @@ function drawPlan(){
     });
     ctx.textAlign='start';ctx.textBaseline='alphabetic';
   }
+  // Aura-Editor: Breitenlabels auf allen Platten, Auswahl mit Rahmen + Griffen + Massen
+  if(auraEdit){
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    Object.keys(S.auraUser).forEach(bn=>{
+      const u=S.auraUser[bn];
+      u.plates.forEach((p,i)=>{
+        const c=auraF2W(u,p.x+p.w/2,p.y+p.h/2);const[X,Y]=W2S(c[0],c[1]);
+        ctx.font='10px ui-monospace,monospace';ctx.fillStyle='rgba(30,40,20,.85)';
+        ctx.fillText(String(Math.round(p.w*1000)),X,Y);
+        if(S.auraSel&&S.auraSel.b===bn&&S.auraSel.i===i){
+          const cor=[[p.x,p.y],[p.x+p.w,p.y],[p.x+p.w,p.y+p.h],[p.x,p.y+p.h],[p.x,p.y]]
+            .map(([fx,fy])=>{const w=auraF2W(u,fx,fy);return W2S(w[0],w[1]);});
+          ctx.beginPath();cor.forEach((q,k)=>k?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1]));
+          ctx.strokeStyle='#c0392b';ctx.lineWidth=2;ctx.setLineDash([]);ctx.stroke();
+          [[p.x+p.w/2,p.y],[p.x+p.w,p.y+p.h/2],[p.x+p.w/2,p.y+p.h],[p.x,p.y+p.h/2]].forEach(([fx,fy])=>{
+            const w=auraF2W(u,fx,fy);const[hx,hy]=W2S(w[0],w[1]);
+            ctx.fillStyle='#fff';ctx.fillRect(hx-4,hy-4,8,8);
+            ctx.fillStyle='#c0392b';ctx.fillRect(hx-3,hy-3,6,6);
+          });
+          const t=auraF2W(u,p.x+p.w/2,p.y+p.h);const[tx,ty]=W2S(t[0],t[1]);
+          ctx.font='bold 11px ui-monospace,monospace';ctx.fillStyle='#c0392b';
+          ctx.fillText(Math.round(p.w*1000)+' × '+Math.round(p.h*1000)+' mm',tx,ty-12);
+        }
+      });
+    });
+    ctx.textAlign='start';ctx.textBaseline='alphabetic';
+  }
   $('#planmeta').textContent=`${mods.length} Module · ${S.carriers.length} Dachflächen`;
 }
 
@@ -1153,9 +1229,66 @@ function nearestCandidate(sx,sy){
   return best;
 }
 function ptSeg(px,py,ax,ay,bx,by){const dx=bx-ax,dy=by-ay,l2=dx*dx+dy*dy;let t=l2?((px-ax)*dx+(py-ay)*dy)/l2:0;t=Math.max(0,Math.min(1,t));const cx=ax+t*dx,cy=ay+t*dy;return Math.hypot(px-cx,py-cy);}
+
+/* ---- Aura-Editor: Helfer ---- */
+const AURA_STD=[1.38,1.94,2.77];
+function auraKindByW(w){const s=AURA_STD.find(v=>Math.abs(w-v)<=0.06);return s?(s===2.77?'2770':s===1.94?'1940':'1380'):'cut';}
+// Welt <-> Rotationsrahmen eines Gebäudes
+function auraW2F(u,wx,wy){const{cc,ss}=u.frame;return [wx*cc-wy*ss, wx*ss+wy*cc];}
+function auraF2W(u,fx,fy){const{cc,ss}=u.frame;return [fx*cc+fy*ss, -fx*ss+fy*cc];}
+// erste Bearbeitung: aktuelles Auto-Layout in S.auraUser einfrieren
+function auraEnsureUser(){
+  const S=St();
+  if(!S.auraUser) S.auraUser={};
+  S.buildings.forEach(b=>{
+    if(S.auraUser[b.name]) return;
+    const a=S.result&&S.result.aura&&S.result.aura[b.name];
+    if(a&&a.frame) S.auraUser[b.name]={frame:{cc:a.frame.cc,ss:a.frame.ss}, plates:(a.framePlates||[]).map(p=>({x:p.x,y:p.y,w:p.w,h:p.h}))};
+    else S.auraUser[b.name]={frame:A().buildingFrame(b), plates:[]};
+  });
+}
+// Platte unter dem Cursor: {b,i,edge:null|'e'|'w'|'n'|'s'} — Kante innerhalb 6 px = Resize
+function auraHit(sx,sy){
+  const S=St(); if(!S.auraUser) return null;
+  const w=S2W(sx,sy);
+  const tol=6/((VIEW.baseScale||1)*(VIEW.zoom||1));
+  for(const bn of Object.keys(S.auraUser)){
+    const u=S.auraUser[bn];
+    const f=auraW2F(u,w[0],w[1]);
+    for(let i=u.plates.length-1;i>=0;i--){
+      const p=u.plates[i];
+      if(f[0]<p.x-tol||f[0]>p.x+p.w+tol||f[1]<p.y-tol||f[1]>p.y+p.h+tol) continue;
+      let edge=null;
+      if(Math.abs(f[0]-p.x)<=tol) edge='w';
+      else if(Math.abs(f[0]-(p.x+p.w))<=tol) edge='e';
+      else if(Math.abs(f[1]-p.y)<=tol) edge='s';
+      else if(Math.abs(f[1]-(p.y+p.h))<=tol) edge='n';
+      const inside=f[0]>=p.x&&f[0]<=p.x+p.w&&f[1]>=p.y&&f[1]<=p.y+p.h;
+      if(!inside && !edge) continue;
+      return {b:bn,i,edge,f};
+    }
+  }
+  return null;
+}
+// Snap-Kandidaten: Modulkanten + Kanten der anderen Platten (im Rahmen)
+function auraSnapCands(bn){
+  const S=St(); const u=S.auraUser[bn];
+  const b=S.buildings.find(x=>x.name===bn);
+  const xs=[],ys=[];
+  (b?b.mods:[]).forEach(m=>{
+    let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+    m.v.forEach(([wx,wy])=>{const[fx,fy]=auraW2F(u,wx,wy);x0=Math.min(x0,fx);y0=Math.min(y0,fy);x1=Math.max(x1,fx);y1=Math.max(y1,fy);});
+    xs.push(x0,x1);ys.push(y0,y1);
+  });
+  u.plates.forEach((p,i)=>{ if(S.auraSel&&S.auraSel.b===bn&&S.auraSel.i===i)return; xs.push(p.x,p.x+p.w);ys.push(p.y,p.y+p.h); });
+  return {xs,ys};
+}
+function snapTo(v,cands,tol){let best=v,bd=tol;for(const c of cands){const d=Math.abs(c-v);if(d<bd){bd=d;best=c;}}return best;}
+
 function setupCanvas(){
   const cv=$('#plan');
   let dragging=false, dragMoved=false, lastX=0, lastY=0;
+  let auraDrag=null; // {b,i,edge,f0,orig,cands} — aktive Platten-Bearbeitung
   // wheel zoom toward cursor
   cv.addEventListener('wheel',ev=>{
     ev.preventDefault();
@@ -1170,19 +1303,73 @@ function setupCanvas(){
     VIEW.panx += px-a[0]; VIEW.pany += py-a[1];
     drawPlan();
   },{passive:false});
-  // drag to pan
-  cv.addEventListener('mousedown',ev=>{dragging=true;dragMoved=false;const[x,y]=canvasXY(ev);lastX=x;lastY=y;});
-  window.addEventListener('mouseup',()=>{dragging=false;});
+  // drag to pan (oder Aura-Platte bearbeiten)
+  cv.addEventListener('mousedown',ev=>{
+    const S=St();const[x,y]=canvasXY(ev);
+    if(S.activeTool==='__aura'){
+      auraEnsureUser();
+      const h=auraHit(x,y);
+      if(h){
+        S.auraSel={b:h.b,i:h.i};
+        auraDrag={b:h.b,i:h.i,edge:h.edge,f0:h.f,orig:Object.assign({},S.auraUser[h.b].plates[h.i]),cands:auraSnapCands(h.b)};
+        drawPlan();
+        return;
+      }
+      if(S.auraSel){S.auraSel=null;drawPlan();}
+    }
+    dragging=true;dragMoved=false;lastX=x;lastY=y;
+  });
+  window.addEventListener('mouseup',()=>{
+    dragging=false;
+    if(auraDrag){auraDrag=null;A().compute();renderAll();}
+  });
   cv.addEventListener('mousemove',ev=>{
     const S=St();const[sx,sy]=canvasXY(ev);
+    if(auraDrag){
+      const u=S.auraUser[auraDrag.b];
+      const wpt=S2W(sx,sy);
+      const f=auraW2F(u,wpt[0],wpt[1]);
+      const dx=f[0]-auraDrag.f0[0], dy=f[1]-auraDrag.f0[1];
+      const p=u.plates[auraDrag.i], o=auraDrag.orig, C=auraDrag.cands, T=0.05;
+      const r2=v=>Math.round(v*100)/100;
+      if(!auraDrag.edge){ // verschieben, Kanten snappen
+        let nx=r2(o.x+dx), ny=r2(o.y+dy);
+        const sl=snapTo(nx,C.xs,T), sr=snapTo(nx+o.w,C.xs,T);
+        if(sl!==nx) nx=sl; else if(sr!==nx+o.w) nx=r2(sr-o.w);
+        const sb=snapTo(ny,C.ys,T), st=snapTo(ny+o.h,C.ys,T);
+        if(sb!==ny) ny=sb; else if(st!==ny+o.h) ny=r2(st-o.h);
+        p.x=nx;p.y=ny;
+      } else if(auraDrag.edge==='e'){ // Breite über rechte Kante, rastet auf Standardbreiten
+        const re=snapTo(r2(o.x+o.w+dx),C.xs,T);
+        p.w=r2(snapTo(Math.max(0.2,re-o.x),AURA_STD,0.04));
+      } else if(auraDrag.edge==='w'){ // Breite über linke Kante (rechte bleibt fix)
+        const le=snapTo(r2(o.x+dx),C.xs,T);
+        const wN=r2(snapTo(Math.max(0.2,o.x+o.w-le),AURA_STD,0.04));
+        p.x=r2(o.x+o.w-wN);p.w=wN;
+      } else if(auraDrag.edge==='n'){ // Höhe über obere Kante
+        const te=snapTo(r2(o.y+o.h+dy),C.ys,T);
+        p.h=r2(Math.max(0.2,te-o.y));
+      } else if(auraDrag.edge==='s'){ // Höhe über untere Kante (obere bleibt fix)
+        const be=snapTo(r2(o.y+dy),C.ys,T);
+        p.y=r2(Math.min(be,o.y+o.h-0.2));p.h=r2(o.y+o.h-p.y);
+      }
+      drawPlan();
+      return;
+    }
     if(dragging){const dx=sx-lastX,dy=sy-lastY;if(Math.abs(dx)+Math.abs(dy)>2)dragMoved=true;VIEW.panx+=dx;VIEW.pany+=dy;lastX=sx;lastY=sy;drawPlan();cv.style.cursor='grabbing';return;}
     if(!S.activeTool){cv.style.cursor='grab';return;}
     if(S.activeTool==='__draw'){cv.style.cursor='crosshair';return;}
+    if(S.activeTool==='__aura'){
+      const h=auraHit(sx,sy);
+      cv.style.cursor=h?((h.edge==='e'||h.edge==='w')?'ew-resize':(h.edge?'ns-resize':'move')):'grab';
+      return;
+    }
     cv.style.cursor=nearestCandidate(sx,sy)?'pointer':'grab';
   });
   cv.addEventListener('click',ev=>{
     const S=St();if(dragMoved){dragMoved=false;return;} // ignore clicks that were drags
     if(!S.activeTool)return;
+    if(S.activeTool==='__aura')return; // Auswahl/Bearbeitung läuft über mousedown/-move
     const[sx,sy]=canvasXY(ev);
     if(S.activeTool==='__draw'){
       const w=S2W(sx,sy);
@@ -1206,6 +1393,16 @@ function setupCanvas(){
   if(zin)zin.onclick=()=>{VIEW.zoom=Math.min(40,(VIEW.zoom||1)*1.3);drawPlan();};
   if(zout)zout.onclick=()=>{VIEW.zoom=Math.max(0.3,(VIEW.zoom||1)/1.3);drawPlan();};
   if(zfit)zfit.onclick=()=>{VIEW.zoom=1;VIEW.panx=0;VIEW.pany=0;drawPlan();};
+  // Entf/Backspace löscht die ausgewählte Aura-Platte
+  window.addEventListener('keydown',ev=>{
+    const S=St();
+    if(S.activeTool!=='__aura'||!S.auraSel)return;
+    if(ev.key!=='Delete'&&ev.key!=='Backspace')return;
+    if(/INPUT|SELECT|TEXTAREA/.test((ev.target&&ev.target.tagName)||''))return;
+    ev.preventDefault();
+    const u=S.auraUser&&S.auraUser[S.auraSel.b];
+    if(u){u.plates.splice(S.auraSel.i,1);S.auraSel=null;A().compute();renderAll();}
+  });
 }
 
 /* ---- stats ---- */
@@ -1256,7 +1453,8 @@ function renderNote(){const S=St(),p=S.params,n=$('#assumptions');const warn=p.h
     `Aura = Restfläche der Dachflächen ins Plattenraster. First beidseitig. `+
     `${assigned} Kanten manuell zugewiesen`+
     (S.preset&&S.preset.length?' · DXF-Layer werden je Kantentyp automatisch genutzt, bis der Typ manuell markiert wird':'')+
-    (S.sptSnow&&S.sptSnow.length?' · Schneefang automatisch aus SPT erkannt':'')+`. `+
+    (S.sptSnow&&S.sptSnow.length?' · Schneefang automatisch aus SPT erkannt':'')+
+    (S.auraUser?' · Aura-Platten manuell bzw. aus Datei (Automatik über „Aura bearbeiten → Auto-Layout" wiederherstellbar)':'')+`. `+
     `Kanten ohne Zuweisung bleiben unberücksichtigt – First/Grat/Kehle im Editor markieren.`;
 }
 
