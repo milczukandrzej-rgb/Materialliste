@@ -1,10 +1,15 @@
-# Sunskin Roof Lap – Materialliste-Tool
+# Sunskin Materialrechner
 
-Browser-Tool, das aus CAD-Planexporten automatisch eine Materialliste erzeugt.
-Läuft lokal im Browser – die Plandaten verlassen den Rechner nicht.
+Browser-Tools, die Materiallisten für Swisspearl-Solarsysteme erzeugen.
+Läuft lokal im Browser – die Daten verlassen den Rechner nicht.
 
-> **Neu:** Für das Fassadensystem gibt es den Schwester-Rechner
-> **`facade-flat.html`** (Sunskin Facade Flat) – siehe Abschnitt am Ende.
+**`index.html` ist die Startseite** mit der Auswahl der beiden Rechner:
+
+- **`roof-lap.html`** – Sunskin **Roof Lap** (Dach), Materialliste aus DXF/DWG
+- **`facade-flat.html`** – Sunskin **Facade Flat** (Fassade), Materialliste aus
+  Fassadenfeldern (siehe Abschnitt am Ende)
+
+# Sunskin Roof Lap – Materialliste-Tool (`roof-lap.html`)
 
 ## Unterstützte Dateien
 - **PV*Sol-DXF** (Dachaufsicht, Layer `MODULES` etc.)
@@ -15,7 +20,9 @@ Läuft lokal im Browser – die Plandaten verlassen den Rechner nicht.
   Blöcke werden aufgelöst, die Zeichnungseinheit wird automatisch erkannt.
 
 ## Dateien (alle im selben Ordner lassen)
-- `index.html` – das Tool (hiermit starten)
+- `index.html` – Startseite (Auswahl Roof Lap / Facade Flat)
+- `roof-lap.html` – das Roof-Lap-Tool
+- `facade-flat.html` – das Facade-Flat-Tool
 - `dwg_support.js` – DWG-Leser
 - `dist-esm.js`, `wasm-glue.js`, `libredwg-web.wasm` – DWG-Bibliothek (libredwg)
 
@@ -29,7 +36,8 @@ einen lokalen Webserver geöffnet werden (Browser-Sicherheit verbietet WASM-Lade
 
 - VS Code: Erweiterung „Live Server", Rechtsklick auf die HTML → „Open with Live Server".
 - Python: im Ordner `python -m http.server` ausführen, dann
-  `http://localhost:8000/index.html` öffnen.
+  `http://localhost:8000/roof-lap.html` öffnen.
+- Oder über den GitHub-Pages-Link des Repos (dort funktioniert auch DWG).
 
 ## Bedienung
 1. DXF oder DWG hineinziehen.
