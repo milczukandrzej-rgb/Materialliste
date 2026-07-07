@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sunskin Facade Flat – Materialliste</title>
+<style>
+  :root{
+    --ink:#1a1c20;          /* near-black ink */
+    --paper:#eceae3;        /* blueprint paper warm grey */
+    --line:#c9c6bc;         /* hairline */
+    --blue:#1b4f9c;         /* module blue (matches plan) */
+    --blue-soft:#dce6f4;
+    --red:#c0392b;
+    --amber:#d98a1f;        /* sigma / ergänzungsplatte */
+    --green:#2f7d4f;
+    --grey:#8d959e;         /* inactive module */
+    --panel:#f6f5f0;
+    --shadow:0 1px 0 rgba(0,0,0,.04), 0 8px 24px -16px rgba(0,0,0,.35);
+    --mono:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+    --sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:var(--sans);color:var(--ink);background:var(--paper);
+    font-size:14px;line-height:1.5;
+    background-image:
+      linear-gradient(rgba(27,79,156,.035) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(27,79,156,.035) 1px,transparent 1px);
+    background-size:24px 24px;
+  }
+  .wrap{max-width:1280px;margin:0 auto;padding:0 24px 80px}
+
+  /* ---- Masthead ---- */
+  header.mast{
+    border-bottom:2px solid var(--ink);margin-bottom:28px;
+    padding:26px 24px 16px;max-width:1280px;margin-left:auto;margin-right:auto;
+    display:flex;justify-content:space-between;align-items:flex-end;gap:24px;flex-wrap:wrap;
+  }
+  .mast h1{font-family:var(--mono);font-weight:600;font-size:26px;letter-spacing:-.5px;line-height:1.05}
+  .mast h1 b{color:var(--blue)}
+  .mast .sub{font-family:var(--mono);font-size:11px;color:#6a6a64;margin-top:6px;text-transform:uppercase;letter-spacing:1.5px}
+  .mast .rev{font-family:var(--mono);font-size:11px;color:#6a6a64;text-align:right;line-height:1.7}
+  .mast .rev b{color:var(--ink)}
+  .mast .rev a{color:var(--blue);text-decoration:none}
+
+  /* ---- Stepper ---- */
+  .steps{display:flex;gap:0;margin-bottom:24px;border:1px solid var(--line);background:var(--panel);border-radius:8px;overflow:hidden}
+  .step{flex:1;padding:12px 16px;font-family:var(--mono);font-size:12px;display:flex;gap:10px;align-items:center;border-right:1px solid var(--line);color:#8a8a83;cursor:pointer}
+  .step:last-child{border-right:none}
+  .step .n{width:22px;height:22px;border-radius:50%;border:1.5px solid currentColor;display:grid;place-items:center;font-size:11px;flex:none}
+  .step.active{color:var(--blue);background:#fff}
+
+  /* ---- Layout grid ---- */
+  .grid{display:grid;grid-template-columns:340px 1fr;gap:24px;align-items:start}
+  @media(max-width:900px){.grid{grid-template-columns:1fr}}
+
+  .panel{background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow)}
+  .panel h2{
+    font-family:var(--mono);font-size:12px;text-transform:uppercase;letter-spacing:1.5px;
+    padding:14px 18px;border-bottom:1px solid var(--line);color:#555;display:flex;justify-content:space-between;align-items:center
+  }
+  .panel .body{padding:18px}
+  .panel h2 .tag{font-size:10px;background:var(--blue);color:#fff;padding:2px 7px;border-radius:10px;letter-spacing:1px}
+
+  /* ---- Form controls ---- */
+  .field{margin-bottom:16px}
+  .field:last-child{margin-bottom:0}
+  label.lab{display:block;font-size:12px;font-weight:600;margin-bottom:6px;color:#3a3a36}
+  label.lab .meta{font-weight:400;color:#9a9a92;font-family:var(--mono);font-size:11px;margin-left:6px}
+  select,input[type=number],input[type=text]{
+    width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:7px;background:#fcfcfa;
+    font-family:var(--mono);font-size:13px;color:var(--ink)
+  }
+  select:focus,input:focus{outline:2px solid var(--blue);outline-offset:-1px;border-color:var(--blue)}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .help{font-size:11px;color:#9a9a92;margin-top:5px;line-height:1.4}
+  .switch{display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none;font-size:13px}
+  .switch input{width:auto}
+  .subhead{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:#8a8a83;margin:20px 0 10px;border-bottom:1px dashed var(--line);padding-bottom:5px}
+  .subhead:first-child{margin-top:0}
+
+  /* ---- Preview ---- */
+  .preview{position:relative;background:#fbfbf8;border-radius:8px;overflow:hidden;border:1px solid var(--line)}
+  #plan{display:block;width:100%;height:auto;background:#fbfbf8;touch-action:none}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;padding:12px 18px;border-top:1px solid var(--line);font-family:var(--mono);font-size:11px;color:#555}
+  .legend i{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+
+  /* ---- cell palette ---- */
+  .palette{display:flex;gap:7px;flex-wrap:wrap;padding:14px 18px 6px;align-items:center}
+  .edgebtn{font-family:var(--mono);font-size:12px;padding:6px 11px;border:1.5px solid var(--line);border-radius:7px;background:#fff;cursor:pointer;display:inline-flex;align-items:center;gap:7px;transition:.12s;color:var(--ink)}
+  .edgebtn i{width:11px;height:11px;border-radius:2px;display:inline-block}
+  .edgebtn:hover{border-color:#999}
+  .edgebtn.on{border-color:var(--c,var(--ink));background:var(--c,#eee);color:#fff;box-shadow:inset 0 0 0 1px var(--c)}
+  .edgebtn.on i{background:#fff!important}
+  .editorhint{font-family:var(--mono);font-size:11px;color:#7a7a73;padding:0 18px 12px}
+
+  /* ---- Stats strip ---- */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-bottom:18px}
+  .stat{background:#fff;padding:14px 16px}
+  .stat .v{font-family:var(--mono);font-size:24px;font-weight:600;line-height:1;color:var(--blue)}
+  .stat .k{font-size:11px;color:#8a8a83;margin-top:5px;text-transform:uppercase;letter-spacing:1px}
+
+  /* ---- Table ---- */
+  .tablewrap{overflow-x:auto}
+  table{border-collapse:collapse;width:100%;font-size:13px}
+  th,td{padding:8px 10px;text-align:right;border-bottom:1px solid #efeee9;white-space:nowrap}
+  th:first-child,td:first-child{text-align:left}
+  thead th{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#777;border-bottom:1.5px solid var(--ink);position:sticky;top:0;background:#fff}
+  tbody tr:hover{background:#f7f9fc}
+  tr.grouprow td{background:var(--panel);font-family:var(--mono);font-size:11px;letter-spacing:1px;text-transform:uppercase;color:#555;font-weight:600;border-top:1px solid var(--line)}
+  td.art{text-align:left;max-width:340px;white-space:normal}
+  td.artnr{font-family:var(--mono);font-size:11px;color:#888;white-space:nowrap}
+  td.dim{font-family:var(--mono);font-size:11px;color:#666;white-space:nowrap}
+  td.tot{font-weight:700;color:var(--blue)}
+
+  /* ---- Buttons ---- */
+  .btn{
+    font-family:var(--mono);font-size:13px;padding:10px 18px;border-radius:8px;border:1.5px solid var(--ink);
+    background:var(--ink);color:#fff;cursor:pointer;transition:.12s;display:inline-flex;gap:8px;align-items:center
+  }
+  .btn:hover{transform:translateY(-1px)}
+  .btn.ghost{background:#fff;color:var(--ink)}
+  .btn.blue{background:var(--blue);border-color:var(--blue)}
+  .btn.small{padding:6px 12px;font-size:12px}
+  .btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+  .toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;align-items:center}
+  .toolbar .sp{flex:1}
+
+  .note{font-size:12px;color:#7a7a73;background:#fbf6ea;border:1px solid #ead9b0;border-radius:8px;padding:10px 12px;margin-top:14px;line-height:1.5}
+  .note b{color:var(--amber)}
+  .warn{background:#fdecea;border-color:#e7b6af}.warn b{color:var(--red)}
+
+  .hidden{display:none!important}
+  .buildingpills{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+  .pill{font-family:var(--mono);font-size:11px;padding:4px 10px;border:1px solid var(--line);border-radius:20px;background:#fff;cursor:pointer}
+  .pill.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+  footer{max-width:1280px;margin:40px auto 0;padding:18px 24px;border-top:1px solid var(--line);font-family:var(--mono);font-size:11px;color:#9a9a92;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<header class="mast">
+  <div>
+    <h1>Sunskin <b>Facade Flat</b> · Materialliste</h1>
+    <div class="sub">Fassadenfelder → Stückliste · Swisspearl Schweiz</div>
+  </div>
+  <div class="rev">
+    läuft lokal im browser<br>
+    keine daten verlassen den rechner<br>
+    regelbasis <b>rev. 03.2026</b> · <a href="index.html">→ Roof Lap</a>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="steps" id="stepper">
+    <div class="step active" data-scroll="params"><span class="n">1</span> Fassadenfelder + Parameter</div>
+    <div class="step" data-scroll="editor"><span class="n">2</span> Raster-Editor</div>
+    <div class="step" data-scroll="mat"><span class="n">3</span> Materialliste</div>
+  </div>
+
+  <div class="grid">
+    <!-- left: parameters -->
+    <div class="panel" id="paramsPanel">
+      <h2>Parameter <span class="tag">Projekt</span></h2>
+      <div class="body" id="params"></div>
+    </div>
+
+    <!-- right: editor + results -->
+    <div>
+      <div class="panel" style="margin-bottom:24px" id="editor">
+        <h2>Raster-Editor <span id="planmeta" style="font-family:var(--mono);font-size:11px;color:#999;text-transform:none;letter-spacing:0"></span></h2>
+        <div class="palette" id="palette"></div>
+        <div class="editorhint">Zelle anklicken oder mit gedrückter Maustaste überstreichen, um den gewählten Typ zu setzen. Aussparung = Fenster/Türe/Durchdringung (keine Belegung).</div>
+        <div class="preview"><svg id="plan"></svg></div>
+        <div class="legend">
+          <span><i style="background:var(--blue)"></i>Modul aktiv (PV)</span>
+          <span><i style="background:var(--grey)"></i>Modul inaktiv (Blind)</span>
+          <span><i style="background:var(--amber)"></i>Ergänzungsplatte Sigma 8 Pro</span>
+          <span><i style="background:repeating-linear-gradient(45deg,#fff,#fff 3px,#d9d6cc 3px,#d9d6cc 5px)"></i>Aussparung</span>
+          <span><i style="background:#c9a26b"></i>Stützlatte / Stützprofil</span>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <div class="buildingpills" id="pills"></div>
+        <div class="sp"></div>
+        <button class="btn ghost" id="exportcsv">CSV</button>
+        <button class="btn blue" id="export">Excel exportieren</button>
+      </div>
+
+      <div class="stats" id="stats"></div>
+
+      <div class="panel" id="mat0">
+        <h2 id="mat">Materialliste <span id="listmeta" style="font-family:var(--mono);font-size:11px;color:#999;text-transform:none;letter-spacing:0"></span></h2>
+        <div class="body" style="padding:0">
+          <div class="tablewrap"><table id="matTable"></table></div>
+        </div>
+      </div>
+      <div class="note" id="assumptions"></div>
+    </div>
+  </div>
+</div>
+
+<footer>
+  <span>Sunskin Facade Flat Materialrechner · v1.0</span>
+  <span>Stückzahlen prüfen · „Die Masse sind auf dem Bau zu kontrollieren"</span>
+</footer>
+
+<!-- SheetJS for xlsx export -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+(function(){
+'use strict';
+const $=s=>document.querySelector(s);
+const el=(t,c,txt)=>{const e=document.createElement(t);if(c)e.className=c;if(txt!=null)e.textContent=txt;return e;};
+
+/* ============================================================
+   SYSTEMDATEN  Sunskin Facade Flat (Planung + Ausführung rev. 03.2026)
+   ============================================================ */
+const FUGE=10; // mm, systembedingt (Einhängesystem)
+// Modulformate b×h in mm, je Ausrichtung
+const MOD={
+  XL:{v:{w:780, h:1940}, h:{w:1940, h:780}},
+  L: {v:{w:780, h:1380}, h:{w:1380, h:780}},
+  M: {v:{w:780, h:1010}, h:{w:1010, h:780}},
+};
+// Einhängepunkte (U-Agraffen) je Modul: Spaltenpositionen ab linker Modulkante
+// (Doku S.5/6: vertikal 160/460/160 · XL horizontal 160/540×3/160 · L horizontal 200/980/200 · M horizontal 200/610/200)
+const COLPOS={
+  'XL-v':[160,620],'L-v':[160,620],'M-v':[160,620],
+  'XL-h':[160,700,1240,1780],'L-h':[200,1180],'M-h':[200,810],
+};
+// Agraffen-Reihen je Modul (Doku S.5/6/23: XL vertikal 4 Reihen, alle übrigen 2 Reihen)
+const NROWS={'XL-v':4,'L-v':2,'M-v':2,'XL-h':2,'L-h':2,'M-h':2};
+// Omegaprofil-Längen zu Ergänzungsplatten Sigma 8 Pro (Doku S.7)
+const OMEGA={'XL-v':1540,'L-v':1540,'M-v':1540,'XL-h':1910,'L-h':1350,'M-h':980};
+const PROFIL_ECKE=2800;   // Kreuzeckblech + Windabschottungsprofil Flat, Profillängen mm
+const PROFIL_LUEFT=2500;  // Lüftungsprofile Anschluss oben/unten, Profillängen mm
+const EPDM_ROLLE=25;      // m je Rolle EPDM-Band S8 70 mm
+const EPDM_ZUSCHLAG=1.03; // Überlappungen (min. 40 mm) + Verschnitt
+
+const key=f=>f.type+'-'+f.orient;
+const cellW=f=>MOD[f.type][f.orient].w+FUGE;
+const cellH=f=>MOD[f.type][f.orient].h+FUGE;
+const modW=f=>MOD[f.type][f.orient].w;
+const modH=f=>MOD[f.type][f.orient].h;
+const agrPerModule=f=>COLPOS[key(f)].length*NROWS[key(f)];
+
+/* ============================================================
+   STATE
+   ============================================================ */
+const S={
+  fields:[],            // Fassadenfelder F1..Fn
+  activeField:0,        // index in fields (editor + params)
+  showField:'ALL',      // 'ALL' oder Feldname für Tabelle
+  paint:'A',            // aktueller Zellen-Maltyp
+  params:{ uk:'holz', elektro:false },
+  result:null,
+};
+const CELLTYPES={
+  A:{label:'Modul aktiv',   color:'#1b4f9c'},
+  I:{label:'Modul inaktiv', color:'#8d959e'},
+  S:{label:'Sigma 8 Pro',   color:'#d98a1f'},
+  X:{label:'Aussparung',    color:'#b9b6ab'},
+};
+
+function newField(){
+  const n=S.fields.length+1;
+  const f={name:'F'+n, W:10000, H:6000, type:'XL', orient:'v',
+    bruestung:false, abschlussOben:true, sockelUnten:true,
+    aussenecken:0, innenecken:0, grid:[]};
+  resizeGrid(f);
+  return f;
+}
+function gridDims(f){
+  const cols=Math.max(0,Math.floor((f.W+FUGE)/cellW(f)));
+  const rows=Math.max(0,Math.floor((f.H+FUGE)/cellH(f)));
+  return {cols,rows};
+}
+function resizeGrid(f){
+  const {cols,rows}=gridDims(f);
+  const g=[];
+  for(let r=0;r<rows;r++){
+    const row=[];
+    for(let c=0;c<cols;c++) row.push((f.grid[r]&&f.grid[r][c])||'A');
+    g.push(row);
+  }
+  f.grid=g;
+}
+function rasterW(f){const {cols}=gridDims(f);return cols>0?cols*modW(f)+(cols-1)*FUGE:0;}
+function rasterH(f){const {rows}=gridDims(f);return rows>0?rows*modH(f)+(rows-1)*FUGE:0;}
+
+/* ============================================================
+   RULE ENGINE
+   ============================================================ */
+function analyzeField(f){
+  const {cols,rows}=gridDims(f);
+  let nA=0,nI=0,nS=0;
+  const colUsed=new Array(cols).fill(false); // Spalte trägt Latten, sobald belegt
+  let sigmaJoints=0;                          // horizontale Stösse Sigma↔Sigma
+  for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+    const t=f.grid[r][c];
+    if(t==='A')nA++;else if(t==='I')nI++;else if(t==='S')nS++;
+    if(t!=='X')colUsed[c]=true;
+    if(t==='S'&&c>0&&f.grid[r][c-1]==='S')sigmaJoints++;
+  }
+  // Brüstung: unterste belegte Modulreihe
+  let nBr=0;
+  if(f.bruestung&&rows>0){
+    const r=rows-1;
+    for(let c=0;c<cols;c++){const t=f.grid[r][c];if(t==='A'||t==='I')nBr++;}
+  }
+  const lattenCols=colUsed.filter(Boolean).length*COLPOS[key(f)].length;
+  const modArea=modW(f)*modH(f)/1e6;
+  return {cols,rows,nA,nI,nS,nBr,sigmaJoints,lattenCols,
+    lattenLfm:lattenCols*f.H/1000,
+    areaA:nA*modArea, areaMod:(nA+nI)*modArea, areaS:nS*modArea,
+    rest:Math.max(0,(f.W*f.H-rasterW(f)*rasterH(f))/1e6)};
+}
+
+function compute(){
+  const p=S.params, rows=[], B=S.fields.map(f=>f.name);
+  const blank=()=>{const o={};B.forEach(n=>o[n]=0);return o;};
+  const row=(name,opts)=>{opts=opts||{};const r={art:name,artNr:opts.art||'',dim:opts.dim||'',unit:opts.unit||'Stk',perB:blank()};rows.push(r);return r;};
+  const group=t=>rows.push({group:t});
+  const an={};S.fields.forEach(f=>an[f.name]=analyzeField(f));
+
+  /* ---- Module ---- */
+  group('Sunskin Facade Flat (Programm)');
+  const modRows={},blindRows={};
+  const combos=[['XL','v'],['L','v'],['M','v'],['XL','h'],['L','h'],['M','h']];
+  combos.forEach(([t,o])=>{
+    const d=MOD[t][o], lbl=o==='v'?'vertikal':'horizontal';
+    modRows[t+'-'+o]=row(`Sunskin Facade Flat Modul Typ ${t} ${lbl}`,{dim:`${d.w}×${d.h} mm`});
+  });
+  combos.forEach(([t,o])=>{
+    const d=MOD[t][o], lbl=o==='v'?'vertikal':'horizontal';
+    blindRows[t+'-'+o]=row(`Sunskin Facade Flat Modul inaktiv (Blindmodul) Typ ${t} ${lbl}`,{dim:`${d.w}×${d.h} mm`});
+  });
+  S.fields.forEach(f=>{const a=an[f.name];
+    modRows[key(f)].perB[f.name]+=a.nA;
+    blindRows[key(f)].perB[f.name]+=a.nI;
+  });
+
+  /* ---- Einhängesystem ---- */
+  group('Einhängesystem');
+  const rU=row('U-Agraffe S8, Alu schwarz eloxiert',{dim:''});
+  const rMK=row('Migrationsschutz-K S8, rostfreier Stahl blank (Brüstungsmodule)',{dim:''});
+  const rEA=row('— Einhänge-Agraffe S8 Pro, werkseitig am Modul vormontiert (informativ)',{dim:''});
+  const rMF=row('— Migrationsschutz Flat, werkseitig am Modul, 2 Stk/Modul (informativ)',{dim:''});
+  S.fields.forEach(f=>{const a=an[f.name],agr=agrPerModule(f);
+    rU.perB[f.name]=(a.nA+a.nI+a.nS)*agr;
+    rEA.perB[f.name]=(a.nA+a.nI)*agr;
+    rMF.perB[f.name]=(a.nA+a.nI)*2;
+    // Brüstung: 1 Migrationsschutz-K je unterer Einhängespalte, bei Typ XL vertikal doppelt (Doku S.30)
+    const mkPerMod=COLPOS[key(f)].length*(key(f)==='XL-v'?2:1);
+    rMK.perB[f.name]=a.nBr*mkPerMod;
+  });
+
+  /* ---- Unterkonstruktion + Befestigung ---- */
+  if(p.uk==='holz'){
+    group('Holz-Unterkonstruktion + Befestigung');
+    const rLat=row('Stützlatte vertikal 37×60 mm, FK II/C24, einseitig gehobelt (bauseits)',{dim:'37×60 mm',unit:'lfm'});
+    const rEB=row('EPDM-Band S8 schwarz, Breite 70 mm',{dim:'Rolle à 25 m',unit:'Rolle'});
+    const rEBi=row('— EPDM-Band Bedarf inkl. 3% Überlappung (informativ)',{unit:'lfm'});
+    const rSR=row('Schraube SR2 S8 Inox 4.8×30 mm, schwarz (U-Agraffen + Migrationsschutz Flat)',{dim:'4.8×30 mm'});
+    const rRes=row('Schraube ST 5.5×22 mm (Reserve zu Migrationsschutz Flat)',{dim:'5.5×22 mm'});
+    S.fields.forEach(f=>{const a=an[f.name];
+      rLat.perB[f.name]=r1(a.lattenLfm);
+      rEBi.perB[f.name]=r1(a.lattenLfm*EPDM_ZUSCHLAG);
+      // 2 Schrauben je U-Agraffe (Doku S.25) + 1 je Migrationsschutz Flat (2/Modul, Doku S.28)
+      rSR.perB[f.name]=rU.perB[f.name]*2+(a.nA+a.nI)*2;
+      rRes.perB[f.name]=Math.ceil((a.nA+a.nI)*2*0.05);
+    });
+    // EPDM-Rollen über das ganze Objekt gerechnet (Verschnitt-Minimierung), der Gesamtwert
+    // wird der grössten Position zugeschlagen
+    const totLfm=S.fields.reduce((s,f)=>s+an[f.name].lattenLfm*EPDM_ZUSCHLAG,0);
+    if(S.fields.length){
+      let maxF=S.fields[0];S.fields.forEach(f=>{if(an[f.name].lattenLfm>an[maxF.name].lattenLfm)maxF=f;});
+      rEB.perB[maxF.name]=Math.ceil(totLfm/EPDM_ROLLE);
+    }
+  } else {
+    group('Metall-Unterkonstruktion + Befestigung');
+    const rPro=row('Stützprofil vertikal Alu 45×60×2 mm bzw. Stahl, Auflage ≥60 mm (bauseits)',{dim:'45×60×2 mm',unit:'lfm'});
+    const rNi=row('Niete S8 mit Spezialdorn Inox 4.8×12-K9.0 mm, schwarz (U-Agraffen)',{dim:'4.8×12-K9.0 mm'});
+    const rS16=row('Schraube ST 4.2×16 mm (Migrationsschutz Flat)',{dim:'4.2×16 mm'});
+    const rBo=row('Bohrer Ø4.9 mm S8, Typ A (Alu) / Typ S (Stahl), Länge 90 mm',{dim:'Ø4.9×90 mm'});
+    S.fields.forEach(f=>{const a=an[f.name];
+      rPro.perB[f.name]=r1(a.lattenLfm);
+      rNi.perB[f.name]=rU.perB[f.name]*2;               // 2 Nieten je U-Agraffe (Doku S.47)
+      rS16.perB[f.name]=(a.nA+a.nI)*2;                  // 1 je Migrationsschutz Flat
+      rBo.perB[f.name]=Math.max(a.nA+a.nI+a.nS>0?1:0,Math.ceil(rNi.perB[f.name]/250)); // Annahme ~250 Bohrungen/Bohrer
+    });
+  }
+
+  /* ---- Ecken + Abschlussprofile ---- */
+  group('Ecken + Abschlussprofile');
+  const rWind=row('Windabschottungsprofil Flat, Alu roh',{dim:'L=2800 mm'});
+  const rKreuz=row('Kreuzeckblech Steg 18 mm, Alu pulverbeschichtet',{dim:'L=2800 mm'});
+  const rHalter=row('Eckprofilhalter Flat, Alu roh (3 Stk je Windabschottungsprofil)',{dim:''});
+  const rLu=row('Lüftungsprofil Anschluss unten 10×100 mm, pulverbeschichtet',{dim:'L=2500 mm'});
+  const rLo=row('Lüftungsprofil Anschluss oben, pulverbeschichtet',{dim:'L=2500 mm'});
+  S.fields.forEach(f=>{
+    const nProf=Math.ceil(f.H/PROFIL_ECKE);
+    rWind.perB[f.name]=f.aussenecken*nProf;
+    rKreuz.perB[f.name]=f.aussenecken*nProf;
+    rHalter.perB[f.name]=f.aussenecken*nProf*3;
+    if(f.sockelUnten)rLu.perB[f.name]=Math.ceil(f.W/PROFIL_LUEFT);
+    if(f.abschlussOben)rLo.perB[f.name]=Math.ceil(f.W/PROFIL_LUEFT);
+  });
+
+  /* ---- Ergänzungsplatten Sigma 8 Pro ---- */
+  const anyS=S.fields.some(f=>an[f.name].nS>0);
+  if(anyS){
+    group('Ergänzungsplatten Sigma 8 Pro');
+    const plateRows={},omegaRows={};
+    combos.forEach(([t,o])=>{
+      const d=MOD[t][o], lbl=o==='v'?'vertikal':'horizontal';
+      plateRows[t+'-'+o]=row(`Ergänzungsplatte Largo 8 mm Sigma 8 Pro, Zuschnitt Modultyp ${t} ${lbl}`,{dim:`${d.w}×${d.h} mm`});
+    });
+    [...new Set(Object.values(OMEGA))].sort((a,b)=>a-b).forEach(L=>{
+      omegaRows[L]=row(`Omegaprofil S8 Pro zu Ergänzungsplatte, L=${L} mm`,{dim:`L=${L} mm, h=25 mm`});
+    });
+    const rVerb=row('Verbindungsprofil zu Omega 400×18.7×3 mm (bei gestossenen Omegaprofilen)',{dim:'400×18.7×3 mm'});
+    const rSm2=row('— Fläche Ergänzungsplatten (informativ)',{unit:'m²'});
+    S.fields.forEach(f=>{const a=an[f.name];
+      if(!a.nS)return;
+      plateRows[key(f)].perB[f.name]=a.nS;
+      omegaRows[OMEGA[key(f)]].perB[f.name]=a.nS*2;      // 2 Profilreihen je Platte (Doku S.44)
+      rVerb.perB[f.name]=a.sigmaJoints*2;
+      rSm2.perB[f.name]=r1(a.areaS);
+    });
+  }
+
+  /* ---- Elektro ---- */
+  if(p.elektro){
+    group('Elektrisches Systemzubehör (nach Stringplan)');
+    const rKb=row('Kabelbinder schwarz, L=188 mm (Annahme 4 Stk je aktives Modul)',{dim:'L=188 mm'});
+    const rSl=row('Schraublasche für Kabelbinder Ø5 mm (Annahme 2 Stk je aktives Modul)',{dim:'Ø5 mm'});
+    row('MC4-Verbindungskabel 2000/3000/5000 mm — Anzahl nach Stringplan',{dim:'6 mm²'});
+    row('Steckverbinder MC4 Plus/Minus — Anzahl nach Stringplan',{dim:''});
+    row('Verschlusskappen Stecker Plus/Minus — Anzahl nach Stringplan',{dim:''});
+    S.fields.forEach(f=>{const a=an[f.name];
+      rKb.perB[f.name]=a.nA*4;
+      rSl.perB[f.name]=a.nA*2;
+    });
+  }
+
+  /* ---- Restflächen ---- */
+  group('Kontrolle');
+  const rRest=row('— Restfläche ausserhalb Modulraster (informativ, bauseits lösen)',{unit:'m²'});
+  const rPV=row('— PV-Fläche aktiv (informativ)',{unit:'m²'});
+  S.fields.forEach(f=>{const a=an[f.name];
+    rRest.perB[f.name]=r1(a.rest);
+    rPV.perB[f.name]=r1(a.areaA);
+  });
+
+  rows.forEach(r=>{if(r.group)return;let t=B.reduce((s,n)=>s+(r.perB[n]||0),0);r.total=(r.unit==='lfm'||r.unit==='m²')?Math.round(t*10)/10:t;});
+  S.result={rows,fields:B,an};
+  return S.result;
+}
+function r1(x){return Math.round(x*10)/10;}
+
+/* ============================================================
+   PARAMS PANEL
+   ============================================================ */
+function renderParams(){
+  const box=$('#params');box.innerHTML='';
+  const p=S.params, f=S.fields[S.activeField];
+
+  const sub=t=>box.appendChild(el('div','subhead',t));
+  const fld=(labTxt,input,help)=>{
+    const d=el('div','field'),l=el('label','lab');l.innerHTML=labTxt;d.appendChild(l);d.appendChild(input);
+    if(help){const h=el('div','help');h.innerHTML=help;d.appendChild(h);}
+    box.appendChild(d);return input;
+  };
+  const sel=(opts,val,fn)=>{const s=el('select');opts.forEach(([v,t])=>{const o=el('option',null,t);o.value=v;s.appendChild(o);});s.value=val;s.onchange=()=>fn(s.value);return s;};
+  const num=(val,fn,step)=>{const i=el('input');i.type='number';i.value=val;if(step)i.step=step;i.min=0;i.onchange=()=>fn(+i.value||0);return i;};
+  const chk=(labTxt,val,fn)=>{const l=el('label','switch'),i=el('input');i.type='checkbox';i.checked=val;i.onchange=()=>fn(i.checked);l.appendChild(i);l.appendChild(document.createTextNode(labTxt));const d=el('div','field');d.appendChild(l);box.appendChild(d);return i;};
+
+  /* --- Projekt --- */
+  sub('Projekt');
+  fld('Unterkonstruktion',sel([['holz','Holz-UK (Stützlatten 37×60, Schrauben SR2)'],['metall','Metall-UK (Alu/Stahl-Profile, Nieten S8)']],p.uk,v=>{p.uk=v;update();}),
+    'Reine Holz-UK sind ungeeignet (Genauigkeit) — Holz/Metall- oder Metall-UK gemäss Doku S.17.');
+  chk('Elektrisches Systemzubehör aufführen',p.elektro,v=>{p.elektro=v;update();});
+
+  /* --- Feld --- */
+  if(f){
+    sub('Fassadenfeld '+f.name);
+    const rowEl=el('div','row2');
+    const wIn=num(f.W,v=>{f.W=v;resizeGrid(f);update();});
+    const hIn=num(f.H,v=>{f.H=v;resizeGrid(f);update();});
+    const d1=el('div'),l1=el('label','lab');l1.innerHTML='Breite <span class="meta">mm</span>';d1.appendChild(l1);d1.appendChild(wIn);
+    const d2=el('div'),l2=el('label','lab');l2.innerHTML='Höhe <span class="meta">mm</span>';d2.appendChild(l2);d2.appendChild(hIn);
+    rowEl.appendChild(d1);rowEl.appendChild(d2);
+    const fw=el('div','field');fw.appendChild(rowEl);box.appendChild(fw);
+
+    fld('Modultyp',sel([['XL','Typ XL (780×1940)'],['L','Typ L (780×1380)'],['M','Typ M (780×1010)']],f.type,v=>{f.type=v;resizeGrid(f);update();}));
+    fld('Anordnung',sel([['v','vertikal'],['h','horizontal']],f.orient,v=>{f.orient=v;resizeGrid(f);update();}),
+      'Fugenbreite systembedingt 10 mm (Einhängesystem).');
+
+    const a=analyzeField(f);
+    const snapBtn=el('button','btn ghost small','⌗ Feld auf Raster runden');
+    snapBtn.onclick=()=>{if(a.cols>0&&a.rows>0){f.W=rasterW(f);f.H=rasterH(f);resizeGrid(f);update();}};
+    const snapD=el('div','field');snapD.appendChild(snapBtn);
+    const hint=el('div','help');hint.innerHTML=`Raster: <b>${a.cols} × ${a.rows}</b> Module · Rest B ${Math.max(0,f.W-rasterW(f))} mm · Rest H ${Math.max(0,f.H-rasterH(f))} mm`;
+    snapD.appendChild(hint);box.appendChild(snapD);
+
+    chk('Sockel / Lüftungsprofil Anschluss unten',f.sockelUnten,v=>{f.sockelUnten=v;update();});
+    chk('Oberer Abschluss / Lüftungsprofil oben',f.abschlussOben,v=>{f.abschlussOben=v;update();});
+    chk('Brüstungsfeld (Migrationsschutz-K, unterste Reihe)',f.bruestung,v=>{f.bruestung=v;update();});
+
+    const rowE=el('div','row2');
+    const aIn=num(f.aussenecken,v=>{f.aussenecken=Math.round(v);update();},1);
+    const iIn=num(f.innenecken,v=>{f.innenecken=Math.round(v);update();},1);
+    const e1=el('div'),le1=el('label','lab');le1.innerHTML='Aussenecken <span class="meta">Stk</span>';e1.appendChild(le1);e1.appendChild(aIn);
+    const e2=el('div'),le2=el('label','lab');le2.innerHTML='Innenecken <span class="meta">Stk</span>';e2.appendChild(le2);e2.appendChild(iIn);
+    rowE.appendChild(e1);rowE.appendChild(e2);
+    const fe=el('div','field');fe.appendChild(rowE);
+    const he=el('div','help');he.textContent='Aussenecke: Kreuzeckblech + Windabschottungsprofil Flat + 3 Eckprofilhalter je Profil. Innenecke: ohne Zusatzprofile.';
+    fe.appendChild(he);box.appendChild(fe);
+
+    /* --- Feld-Verwaltung --- */
+    sub('Felder');
+    const btns=el('div','field');
+    const addB=el('button','btn ghost small','+ Feld hinzufügen');
+    addB.onclick=()=>{S.fields.push(newField());S.activeField=S.fields.length-1;S.showField='ALL';update();};
+    btns.appendChild(addB);
+    if(S.fields.length>1){
+      const delB=el('button','btn ghost small','– Feld '+f.name+' löschen');
+      delB.style.marginLeft='8px';
+      delB.onclick=()=>{S.fields.splice(S.activeField,1);S.fields.forEach((x,i)=>x.name='F'+(i+1));S.activeField=0;S.showField='ALL';update();};
+      btns.appendChild(delB);
+    }
+    box.appendChild(btns);
+    const hf=el('div','help');hf.textContent='Jedes Feld ist eine Fassadenfläche (z. B. Süd, West, Stockwerk). Die Materialliste zeigt Spalten je Feld und die Gesamtsumme.';
+    box.appendChild(hf);
+  }
+}
+
+/* ============================================================
+   CELL PALETTE
+   ============================================================ */
+function buildPalette(){
+  const pal=$('#palette');pal.innerHTML='';
+  Object.entries(CELLTYPES).forEach(([k,t])=>{
+    const b=el('button','edgebtn'+(S.paint===k?' on':''));
+    b.style.setProperty('--c',t.color);
+    const i=el('i');i.style.background=t.color;b.appendChild(i);
+    b.appendChild(document.createTextNode(t.label));
+    b.onclick=()=>{S.paint=k;buildPalette();};
+    pal.appendChild(b);
+  });
+  const reset=el('button','edgebtn','↺ alles aktiv');
+  reset.onclick=()=>{const f=S.fields[S.activeField];if(!f)return;f.grid.forEach(r=>r.fill('A'));update();};
+  pal.appendChild(reset);
+}
+
+/* ============================================================
+   SVG PREVIEW / EDITOR
+   ============================================================ */
+let painting=false;
+function drawPlan(){
+  const svg=$('#plan');const f=S.fields[S.activeField];
+  if(!f){svg.innerHTML='';return;}
+  const {cols,rows}=gridDims(f);
+  const mW=modW(f),mH=modH(f),cW=cellW(f),cH=cellH(f);
+  const margin=Math.max(f.W,f.H)*0.06+300;
+  svg.setAttribute('viewBox',`${-margin} ${-margin} ${f.W+2*margin} ${f.H+2*margin}`);
+  const fs=Math.max(f.W,f.H)*0.022;
+  const parts=[];
+  parts.push(`<defs>
+    <pattern id="hatch" width="140" height="140" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+      <rect width="140" height="140" fill="#ffffff"/><line x1="0" y1="0" x2="0" y2="140" stroke="#d9d6cc" stroke-width="40"/>
+    </pattern>
+    <pattern id="resthatch" width="180" height="180" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+      <rect width="180" height="180" fill="#f1efe8"/><line x1="0" y1="0" x2="0" y2="180" stroke="#dcd9cf" stroke-width="30"/>
+    </pattern>
+  </defs>`);
+  // Fassadenumriss
+  parts.push(`<rect x="0" y="0" width="${f.W}" height="${f.H}" fill="#fff" stroke="#1a1c20" stroke-width="2" vector-effect="non-scaling-stroke"/>`);
+  // Reststreifen
+  const rW=rasterW(f),rH=rasterH(f);
+  if(f.W-rW>1)parts.push(`<rect x="${rW}" y="0" width="${f.W-rW}" height="${f.H}" fill="url(#resthatch)"/>`);
+  if(f.H-rH>1)parts.push(`<rect x="0" y="${rH}" width="${Math.min(rW,f.W)}" height="${f.H-rH}" fill="url(#resthatch)"/>`);
+  // Stützlatten (hinter den Modulen)
+  const latW=60;
+  for(let c=0;c<cols;c++){
+    let used=false;for(let r=0;r<rows;r++)if(f.grid[r][c]!=='X')used=true;
+    if(!used)continue;
+    COLPOS[key(f)].forEach(px=>{
+      parts.push(`<rect x="${c*cW+px-latW/2}" y="0" width="${latW}" height="${f.H}" fill="#c9a26b" opacity="0.45"/>`);
+    });
+  }
+  // Zellen
+  const fill={A:'#1b4f9c',I:'#8d959e',S:'#d98a1f',X:'url(#hatch)'};
+  const op={A:'0.82',I:'0.75',S:'0.7',X:'1'};
+  for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+    const t=f.grid[r][c],x=c*cW,y=r*cH;
+    parts.push(`<rect class="cell" data-r="${r}" data-c="${c}" x="${x}" y="${y}" width="${mW}" height="${mH}" fill="${fill[t]}" fill-opacity="${op[t]}" stroke="#1a1c20" stroke-width="1" vector-effect="non-scaling-stroke" style="cursor:crosshair"/>`);
+    if(t==='A'){ // Anschlussdose andeuten (PV)
+      parts.push(`<line x1="${x+mW*0.1}" y1="${y+mH*0.5}" x2="${x+mW*0.9}" y2="${y+mH*0.5}" stroke="#ffffff" stroke-opacity="0.35" stroke-width="1" vector-effect="non-scaling-stroke" pointer-events="none"/>`);
+    }
+  }
+  // Bemassung
+  const dim=(x1,y1,x2,y2,txt,vert)=>{
+    parts.push(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#6a6a64" stroke-width="1" vector-effect="non-scaling-stroke"/>`);
+    const tx=(x1+x2)/2,ty=(y1+y2)/2;
+    parts.push(`<text x="${tx}" y="${ty}" font-family="ui-monospace,monospace" font-size="${fs}" fill="#3a3a36" text-anchor="middle" ${vert?`transform="rotate(-90 ${tx} ${ty})" dy="-${fs*0.5}"`:`dy="${fs*1.3}"`}>${txt}</text>`);
+  };
+  dim(0,f.H+fs*1.6,f.W,f.H+fs*1.6,`${f.W.toLocaleString('de-CH')} mm`,false);
+  dim(-fs*1.6,0,-fs*1.6,f.H,`${f.H.toLocaleString('de-CH')} mm`,true);
+  svg.innerHTML=parts.join('');
+
+  // Interaktion
+  const apply=t=>{const r=+t.dataset.r,c=+t.dataset.c;
+    if(f.grid[r][c]===S.paint)return;
+    f.grid[r][c]=S.paint;
+    t.setAttribute('fill',fill[S.paint]);t.setAttribute('fill-opacity',op[S.paint]);
+    scheduleRecalc();
+  };
+  svg.querySelectorAll('.cell').forEach(cell=>{
+    cell.addEventListener('pointerdown',e=>{e.preventDefault();painting=true;apply(cell);});
+    cell.addEventListener('pointerenter',()=>{if(painting)apply(cell);});
+  });
+  const a=analyzeField(f);
+  $('#planmeta').textContent=`${f.name} · ${(f.W/1000).toFixed(2)} × ${(f.H/1000).toFixed(2)} m · Raster ${a.cols}×${a.rows} · ${f.type} ${f.orient==='v'?'vertikal':'horizontal'}`;
+}
+window.addEventListener('pointerup',()=>{painting=false;});
+let recalcT=null;
+function scheduleRecalc(){clearTimeout(recalcT);recalcT=setTimeout(()=>{compute();renderStats();renderTable();renderNote();renderParams();},120);}
+
+/* ============================================================
+   PILLS / STATS / TABLE / NOTE
+   ============================================================ */
+function buildPills(){
+  const box=$('#pills');box.innerHTML='';
+  const mk=(name,label)=>{
+    const b=el('button','pill'+(S.showField===name?' on':''),label);
+    b.onclick=()=>{S.showField=name;
+      if(name!=='ALL'){const i=S.fields.findIndex(x=>x.name===name);if(i>=0)S.activeField=i;}
+      update();};
+    box.appendChild(b);
+  };
+  if(S.fields.length>1)mk('ALL','alle Felder');
+  S.fields.forEach(f=>mk(f.name,f.name));
+}
+
+function renderStats(){
+  const r=S.result,box=$('#stats');box.innerHTML='';
+  let nA=0,nTot=0,area=0,agr=0;
+  S.fields.forEach(f=>{const a=r.an[f.name];nA+=a.nA;nTot+=a.nA+a.nI;area+=a.areaA;agr+=(a.nA+a.nI+a.nS)*agrPerModule(f);});
+  [['Module aktiv',nA],['Module total',nTot],['PV-Fläche m²',r1(area)],['U-Agraffen',agr]]
+   .forEach(([k,v])=>{const d=el('div','stat');d.appendChild(el('div','v',(v||0).toLocaleString('de-CH')));d.appendChild(el('div','k',k));box.appendChild(d);});
+}
+
+const KEEP=/informativ|bauseits|Stringplan|Restfläche/;
+function renderTable(){
+  const r=S.result,t=$('#matTable');t.innerHTML='';
+  const showB=S.showField==='ALL'?r.fields:[S.showField];
+  const multiB=showB.length>1;
+  const thead=el('thead'),htr=el('tr');
+  ['Artikel-Nr.','Bezeichnung','Abmessung','Einh.'].forEach(h=>htr.appendChild(el('th',null,h)));
+  if(multiB)showB.forEach(b=>htr.appendChild(el('th',null,b)));
+  htr.appendChild(el('th',null,'Anzahl'));
+  thead.appendChild(htr);t.appendChild(thead);
+  const tb=el('tbody');
+  const ncol=4+(multiB?showB.length:0)+1;
+  r.rows.forEach(row=>{
+    if(row.group){const tr=el('tr','grouprow'),td=el('td',null,row.group);td.colSpan=ncol;tr.appendChild(td);tb.appendChild(tr);return;}
+    const tot=S.showField==='ALL'?row.total:(row.perB[S.showField]||0);
+    if(!tot&&!KEEP.test(row.art))return;
+    const tr=el('tr');
+    tr.appendChild(el('td','artnr',row.artNr||''));
+    tr.appendChild(el('td','art',row.art));
+    tr.appendChild(el('td','dim',row.dim||''));
+    tr.appendChild(el('td',null,row.unit));
+    if(multiB)showB.forEach(b=>tr.appendChild(el('td',null,fmt(row.perB[b]||0))));
+    tr.appendChild(el('td','tot',fmt(tot)));
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb);
+  $('#listmeta').textContent=S.showField==='ALL'?'alle Felder':S.showField;
+}
+function fmt(v){if(v===0)return '–';if(Number.isInteger(v))return v.toLocaleString('de-CH');return v.toLocaleString('de-CH',{minimumFractionDigits:1,maximumFractionDigits:1});}
+
+function renderNote(){
+  const n=$('#assumptions');
+  const anyRest=S.fields.some(f=>{const a=S.result.an[f.name];return a.rest>0.05;});
+  n.className='note';
+  n.innerHTML=
+    `<b>Regelbasis Doku rev. 03.2026:</b> U-Agraffe S8 je Einhängepunkt (XL 8, L/M 4 je Modul) · `+
+    `2 Befestiger je U-Agraffe (Holz: SR2 4.8×30 · Metall: Niete S8 4.8×12) · `+
+    `Einhänge-Agraffen, Backrail und Migrationsschutz Flat sind werkseitig am Modul (nur Befestigungsschrauben gerechnet) · `+
+    `Fugenbreite 10 mm systembedingt · Stützlatten/-profile je Modulspalte über volle Feldhöhe, EPDM-Band vollflächig (+3%) · `+
+    `Ecken- und Lüftungsprofile in Standardlängen (2800/2500 mm) je Feld gerechnet · `+
+    `Ergänzungsplatten Sigma 8 Pro mit 2 Omegaprofilen je Platte. `+
+    (anyRest?'<br><b>Hinweis:</b> Restflächen ausserhalb des Modulrasters (schraffiert) sind bauseits zu lösen (Zuschnitt-Ergänzungsplatten, Anschlussbleche) — «Feld auf Raster runden» vermeidet Rest. ':'')+
+    `Einhängeweg 17 mm / 20 mm Freiraum bei Durchdringungen · Anzugs-Drehmoment Einhänge-Agraffen 6.0 Nm · Hinterlüftung min. 40 mm. `+
+    `Die Masse sind auf dem Bau zu kontrollieren.`;
+}
+
+/* ============================================================
+   EXPORT
+   ============================================================ */
+function buildAOA(){
+  const r=S.result,B=r.fields,multiB=B.length>1;
+  const head=['Artikel-Nr.','Bezeichnung','Abmessung','Einheit',...(multiB?B:[]),'Anzahl'],aoa=[head];
+  r.rows.forEach(row=>{
+    if(row.group){aoa.push([row.group]);return;}
+    if(!row.total&&!KEEP.test(row.art))return;
+    aoa.push([row.artNr||'',row.art,row.dim||'',row.unit,...(multiB?B.map(b=>row.perB[b]||0):[]),row.total]);
+  });
+  return {aoa,B};
+}
+function exportCSV(){
+  const {aoa}=buildAOA();
+  const csv=aoa.map(r=>r.map(c=>{const s=String(c==null?'':c);return /[";\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}).join(';')).join('\r\n');
+  dl(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}),'Materialliste_Sunskin_FacadeFlat.csv');
+}
+function exportXlsx(){
+  if(typeof XLSX==='undefined'){exportCSV();return;}
+  const {aoa,B}=buildAOA();
+  const ws=XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols']=[{wch:6},{wch:64},{wch:16},{wch:8},...B.map(()=>({wch:8})),{wch:9}];
+  const ov=[['Feld','Breite mm','Höhe mm','Modultyp','Anordnung','Raster','Module aktiv','Module inaktiv','Sigma-Platten','PV-Fläche m²']];
+  S.fields.forEach(f=>{const a=S.result.an[f.name];
+    ov.push([f.name,f.W,f.H,f.type,f.orient==='v'?'vertikal':'horizontal',`${a.cols}×${a.rows}`,a.nA,a.nI,a.nS,r1(a.areaA)]);
+  });
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(ov),'Übersicht');
+  XLSX.utils.book_append_sheet(wb,ws,'Materialliste');
+  XLSX.writeFile(wb,'Materialliste_Sunskin_FacadeFlat.xlsx');
+}
+function dl(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},100);}
+
+/* ============================================================
+   MASTER
+   ============================================================ */
+function update(){
+  compute();
+  renderParams();buildPalette();buildPills();drawPlan();
+  renderStats();renderTable();renderNote();
+}
+$('#export').addEventListener('click',exportXlsx);
+$('#exportcsv').addEventListener('click',exportCSV);
+document.querySelectorAll('.step').forEach(s=>{
+  s.addEventListener('click',()=>{
+    document.querySelectorAll('.step').forEach(x=>x.classList.remove('active'));
+    s.classList.add('active');
+    const id=s.dataset.scroll==='params'?'paramsPanel':(s.dataset.scroll==='editor'?'editor':'mat0');
+    const t=document.getElementById(id);if(t)t.scrollIntoView({behavior:'smooth',block:'start'});
+  });
+});
+
+S.fields.push(newField());
+update();
+})();
+</script>
+</body>
+</html>
