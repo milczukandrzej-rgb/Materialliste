@@ -3,6 +3,9 @@
 Browser-Tool, das aus CAD-Planexporten automatisch eine Materialliste erzeugt.
 Läuft lokal im Browser – die Plandaten verlassen den Rechner nicht.
 
+> **Neu:** Für das Fassadensystem gibt es den Schwester-Rechner
+> **`facade-flat.html`** (Sunskin Facade Flat) – siehe Abschnitt am Ende.
+
 ## Unterstützte Dateien
 - **PV*Sol-DXF** (Dachaufsicht, Layer `MODULES` etc.)
 - **SPT-DWG** (AutoCAD 2018 / AC1032) – Module, Aura-Platten, Aussparungen und
@@ -71,3 +74,43 @@ selbst ein. Manuell markierte Schneefang-Kanten (zusätzlich zur Traufe möglich
 ersetzen die Automatik.
 
 Regelbasis: Planung + Ausführung Sunskin Roof Lap, Rev. 01.2025.
+
+---
+
+# Sunskin Facade Flat – Materialliste-Tool (`facade-flat.html`)
+
+Eigenständiger Rechner im gleichen Stil für das PV-Fassadensystem
+**Sunskin Facade Flat**. Kein CAD-Import nötig: Fassadenfelder werden direkt
+über Breite × Höhe definiert, das Modulraster wird daraus berechnet.
+Öffnet per Doppelklick auf die HTML-Datei (kein Webserver nötig; nur der
+Excel-Export braucht Internet fürs SheetJS-CDN, sonst CSV nutzen).
+
+## Bedienung
+1. **Fassadenfeld** definieren: Breite/Höhe in mm, Modultyp (XL 780×1940,
+   L 780×1380, M 780×1010), Anordnung vertikal/horizontal. Weitere Felder
+   (Süd, West, Stockwerke …) mit „+ Feld hinzufügen" — die Liste zeigt
+   Spalten je Feld und die Gesamtsumme.
+2. **Raster-Editor:** Zellen anklicken/überstreichen und als *Modul aktiv*,
+   *Modul inaktiv (Blindmodul)*, *Ergänzungsplatte Sigma 8 Pro* oder
+   *Aussparung* (Fenster/Türe) markieren.
+3. Optionen je Feld: Lüftungsprofil unten/oben, Brüstungsfeld
+   (Migrationsschutz-K), Anzahl Aussen-/Innenecken.
+4. Materialliste prüfen, als Excel/CSV exportieren.
+
+## Regelbasis (Planung + Ausführung Sunskin Facade Flat, Rev. 03.2026)
+- Fugenbreite 10 mm systembedingt; Raster = Modulmass + Fuge.
+- **U-Agraffe S8** je Einhängepunkt: Typ XL 8 Stk/Modul, Typ L/M 4 Stk/Modul.
+- Befestigung: 2 Schrauben SR2 4.8×30 (Holz-UK) bzw. 2 Nieten S8 4.8×12
+  (Metall-UK) je U-Agraffe; Migrationsschutz Flat mit SR2 bzw. ST 4.2×16.
+- Einhänge-Agraffen, Backrail und Migrationsschutz Flat sind werkseitig am
+  Modul vormontiert (nur informativ aufgeführt).
+- Stützlatten 37×60 (Holz) bzw. Stützprofile 45×60×2 (Metall) je
+  Einhängespalte über die volle Feldhöhe; EPDM-Band S8 70 mm vollflächig
+  (+3 % Überlappung, Rollen à 25 m).
+- Aussenecke: Kreuzeckblech + Windabschottungsprofil Flat (2800 mm) über
+  Feldhöhe, 3 Eckprofilhalter je Profil. Lüftungsprofile in 2500-mm-Längen.
+- Brüstungsfeld: Migrationsschutz-K S8 je untere Einhängespalte
+  (XL vertikal doppelt).
+- Ergänzungsplatten Sigma 8 Pro: Largo-8-mm-Zuschnitt im Modulformat mit
+  2 Omegaprofilen je Platte (Längen 980/1350/1540/1910 nach Modultyp),
+  Verbindungsprofil bei gestossenen Omegaprofilen.
