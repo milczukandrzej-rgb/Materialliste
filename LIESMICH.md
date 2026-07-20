@@ -96,6 +96,9 @@ werden manuell über Breite × Höhe definiert. Öffnet per Doppelklick
 - **DXF/DWG der Fassadenansicht** in die Ladezone ziehen. Module
   (780×1940/1380/1010, vertikal/horizontal) werden automatisch erkannt,
   die Zeichnungseinheit ebenso. Layer `MODULES` wird bevorzugt.
+- Der **Fassadenumriss** (PV*Sol-Layer `MODULAREA`) wird übernommen und
+  gestrichelt hinter den Modulen angezeigt; Fassadenfläche und Restfläche
+  (Umriss minus Module) erscheinen als Kontrollzeilen in der Liste.
 - **Fassade auf 2 Pläne verteilt?** Vor dem Laden der zweiten Datei oben
   „mit aktivem Feld zusammenführen (überlagern)" wählen — gleiche
   Koordinaten werden exakt überlagert, Duplikate übersprungen. Alternativ
