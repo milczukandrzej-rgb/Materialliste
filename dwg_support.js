@@ -183,6 +183,10 @@ function mapSPT(entities, blockOrigin){
    Block-INSERT am Ursprung liegt (ODA-Resave). Explodiert Modelspace-INSERTs
    über die BLOCK_RECORD-Tabelle und erkennt die Zeichnungseinheit über die
    Modul-Langkante (PV*Sol-DXF = Meter, Resaves oft ×10/×100/×1000). */
+function isAuraLayer(name){
+  const leaf=String(name||'').trim().split('|').pop().trim();
+  return leaf.toUpperCase().replace(/[\s_.-]+/g,'').startsWith('AURA');
+}
 function mapGeneric(db){
   const out=[];
   const recs=(db.tables&&db.tables.BLOCK_RECORD&&db.tables.BLOCK_RECORD.entries)||[];
@@ -200,7 +204,8 @@ function mapGeneric(db){
       blocks[e.name].forEach(be=>{
         if(!/POLYLINE/.test(be.type)) return;
         const v=pv(be); if(!v||v.length<2) return;
-        out.push({layer:e.layer, verts:v.map(([x,y])=>{const X=x*sx,Y=y*sy;return [ip.x+X*c-Y*s, ip.y+X*s+Y*c];})});
+        const childLayer=(!be.layer||be.layer==='0')?e.layer:be.layer;
+        out.push({layer:childLayer, verts:v.map(([x,y])=>{const X=x*sx,Y=y*sy;return [ip.x+X*c-Y*s, ip.y+X*s+Y*c];})});
       });
     } else if(/POLYLINE|LINE/.test(e.type)){
       const v=pv(e); if(v&&v.length>=2) out.push({layer:e.layer, verts:v});
@@ -235,10 +240,10 @@ window.__readDWG = async function(arrayBuffer){
     });
   }catch(e){}
   const {resolved, auraPlates, roofs}=mapSPT(ents, blockOrigin);
+  const gen=mapGeneric(db);
   // Kein SPT-Export (keine Modules-INSERTs)? -> generischer Fallback (z. B. in CAD
   // nachbearbeitete PV*Sol-Zeichnung mit Layern MODULES/MODULAREA/Aura als Blöcke).
   if(!resolved.some(e=>e.layer==='MODULES')){
-    const gen=mapGeneric(db);
     if(gen.some(e=>e.layer&&e.layer.toUpperCase()==='MODULES')){
       gen.forEach(e=>{ if(e.layer.toUpperCase()==='MODULES') e.layer='MODULES'; if(e.layer.toUpperCase()==='MODULAREA') e.layer='MODULAREA'; });
       window.__SPT_AURA = [];
@@ -246,6 +251,9 @@ window.__readDWG = async function(arrayBuffer){
       return gen;
     }
   }
+  // Keep manually drawn Aura geometry even in an otherwise valid SPT DWG.
+  // It is imported by roof-lap.html as an editable user layout.
+  gen.filter(e=>isAuraLayer(e.layer)).forEach(e=>resolved.push({layer:'AURA',verts:e.verts}));
   window.__SPT_AURA = auraPlates;
   window.__SPT_ROOFS = roofs;
   return resolved;

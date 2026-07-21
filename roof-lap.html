@@ -66,6 +66,8 @@
 
   /* ---- Layout grid ---- */
   .grid{display:grid;grid-template-columns:340px 1fr;gap:24px;align-items:start}
+  .grid>div{min-width:0}
+  #plan{display:block;max-width:100%}
   @media(max-width:900px){.grid{grid-template-columns:1fr}}
 
   .panel{background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow)}
@@ -241,12 +243,11 @@
 </div>
 
 <footer>
-  <span>Sunskin Roof Lap Materialrechner · v1.0</span>
+  <span>Sunskin Roof Lap Materialrechner · v1.1</span>
   <span>Stückzahlen prüfen · „Die Masse sind auf dem Bau zu kontrollieren"</span>
 </footer>
 
-<!-- SheetJS for xlsx export -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- Offline XLSX export is implemented below; no external scripts required. -->
 <script>
 /* ============================================================
    DXF PARSER  (minimal, tuned for PV*Sol / EliteCAD exports)
@@ -281,6 +282,7 @@ function parseDXF(text){
           else if(c===41) ent.dxf.sx=parseFloat(v);
           else if(c===42) ent.dxf.sy=parseFloat(v);
           else if(c===50) ent.dxf.rot=parseFloat(v);
+          else if(c===70) ent.dxf.flags=parseInt(v,10)||0;
           else if(c===11) ent.dxf.x2=parseFloat(v);
           else if(c===21) ent.dxf.y2=parseFloat(v);
           if(type==='LWPOLYLINE'){
@@ -296,6 +298,28 @@ function parseDXF(text){
     }
     return out;
   }
+  // AutoCAD may write a closed shape either as LWPOLYLINE or as the older
+  // POLYLINE + VERTEX ... + SEQEND sequence. Convert both to one representation.
+  function normalizeEntities(list){
+    const out=[];
+    for(let n=0;n<list.length;n++){
+      const e=list[n];
+      if(e.type==='POLYLINE'){
+        const verts=[];let j=n+1;
+        while(j<list.length&&list[j].type!=='SEQEND'){
+          const v=list[j];if(v.type==='VERTEX'&&Number.isFinite(v.dxf.x)&&Number.isFinite(v.dxf.y))verts.push([v.dxf.x,v.dxf.y]);j++;
+        }
+        if(verts.length>=2){const p={...e,type:'LWPOLYLINE',verts};if((e.dxf.flags&1)&&dist(verts[0],verts[verts.length-1])>1e-9)p.verts.push([...verts[0]]);out.push(p);}
+        n=j;
+        continue;
+      }
+      if(e.type==='VERTEX'||e.type==='SEQEND')continue;
+      if(e.type==='LWPOLYLINE'&&(e.dxf.flags&1)&&e.verts.length>2&&dist(e.verts[0],e.verts[e.verts.length-1])>1e-9)e.verts.push([...e.verts[0]]);
+      out.push(e);
+    }
+    return out;
+  }
+  function dist(a,b){return Math.hypot(b[0]-a[0],b[1]-a[1]);}
   // walk sections
   while(i<toks.length){
     const [code,val]=toks[i];
@@ -310,14 +334,14 @@ function parseDXF(text){
           if(toks[i][0]===0 && toks[i][1]==='BLOCK'){
             let bname=''; i++;
             while(i<toks.length && toks[i][0]!==0){ if(toks[i][0]===2) bname=toks[i][1]; i++; }
-            const ents=readEntities();
+            const ents=normalizeEntities(readEntities());
             blocks[bname]=ents;
             // skip ENDBLK
             if(i<toks.length && toks[i][0]===0 && toks[i][1]==='ENDBLK') i++;
           } else i++;
         }
       } else if(sname==='ENTITIES'){
-        const ents=readEntities();
+        const ents=normalizeEntities(readEntities());
         for(const e of ents) entities.push(e);
       }
       continue;
@@ -339,15 +363,17 @@ function parseDXF(text){
       const ox=e.dxf.x||0, oy=e.dxf.y||0, sx=e.dxf.sx||1, sy=e.dxf.sy||1, rot=(e.dxf.rot||0)*Math.PI/180;
       const cos=Math.cos(rot), sin=Math.sin(rot);
       for(const be of blocks[e.dxf.name]){
+        // Layer 0 inherits the INSERT layer; explicitly assigned layers stay intact.
+        const childLayer=(!be.layer||be.layer==='0')?e.layer:be.layer;
         if(be.type==='LWPOLYLINE'){
           const vs=be.verts.map(([x,y])=>{
             const X=x*sx, Y=y*sy;
             return [ox+X*cos-Y*sin, oy+X*sin+Y*cos];
           });
-          resolved.push({layer:e.layer,type:'POLY',verts:vs});
+          resolved.push({layer:childLayer,type:'POLY',verts:vs});
         } else if(be.type==='LINE'){
           const tr=([x,y])=>{const X=x*sx,Y=y*sy;return [ox+X*cos-Y*sin,oy+X*sin+Y*cos];};
-          resolved.push({layer:e.layer,type:'POLY',verts:[tr([be.dxf.x,be.dxf.y]),tr([be.dxf.x2,be.dxf.y2])]});
+          resolved.push({layer:childLayer,type:'POLY',verts:[tr([be.dxf.x,be.dxf.y]),tr([be.dxf.x2,be.dxf.y2])]});
         }
       }
     } else {
@@ -386,6 +412,15 @@ const EDGE_TYPES = {
 };
 const FMT=[{t:'L',mm:1380},{t:'M',mm:1010},{t:'XL',mm:1940}];
 
+function canonicalLayer(name){
+  const leaf=String(name||'0').trim().split('|').pop().trim();
+  const key=leaf.toUpperCase().replace(/[\s_.-]+/g,'');
+  if(key.startsWith('AURA'))return 'AURA';
+  const known={MODULES:'MODULES',MODULAREA:'MODULAREA',MODULECARRIERS:'MODULECARRIERS',BARREDAREAS:'BARREDAREAS',ENVIRONMENT:'ENVIRONMENT',
+    FIRST:'First',SEITENANSCHLUSSPROFIL:'Seitenanschlussprofil',GRAT:'Grat',KEHLE:'Kehle',SCHNEEFANG:'Schneefang',__SNOWGUARD__:'__SNOWGUARD__'};
+  return known[key]||leaf;
+}
+
 /* ---- geometry ---- */
 const H=(a,b)=>Math.hypot(b[0]-a[0],b[1]-a[1]);
 const mid=(a,b)=>[(a[0]+b[0])/2,(a[1]+b[1])/2];
@@ -395,6 +430,19 @@ function centroid(v){let x=0,y=0,n=0;for(const[px,py]of v){x+=px;y+=py;n++;}retu
 function polyArea(v){let s=0;for(let i=0;i<v.length;i++){const[x1,y1]=v[i],[x2,y2]=v[(i+1)%v.length];s+=x1*y2-x2*y1;}return Math.abs(s)/2;}
 function pointInPoly(pt,poly){let c=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const xi=poly[i][0],yi=poly[i][1],xj=poly[j][0],yj=poly[j][1];if(((yi>pt[1])!==(yj>pt[1]))&&(pt[0]<(xj-xi)*(pt[1]-yi)/(yj-yi)+xi))c=!c;}return c;}
 function polyLen(v){let s=0;for(let i=0;i<v.length-1;i++)s+=H(v[i],v[i+1]);return s;}
+
+/* DXF $INSUNITS is frequently missing or wrong. Infer scale from module geometry. */
+function normalizeScale(resolved){
+  const lens=(resolved||[]).filter(e=>e.layer==='MODULES'&&e.verts&&e.verts.length>=4)
+    .map(e=>longEdge(e.verts).len).filter(Number.isFinite).sort((a,b)=>a-b);
+  if(!lens.length)return {resolved:resolved||[],factor:1,median:null};
+  const median=lens[Math.floor(lens.length/2)],expected=[1.01,1.38,1.94],factors=[1,100,1000];
+  let factor=1,best=Infinity;
+  factors.forEach(f=>expected.forEach(m=>{const rel=Math.abs(median/f-m)/m;if(rel<best){best=rel;factor=f;}}));
+  if(best>0.30)factor=1;
+  if(factor===1)return {resolved,factor,median};
+  return {resolved:(resolved||[]).map(e=>({...e,verts:e.verts?e.verts.map(([x,y])=>[x/factor,y/factor]):e.verts})),factor,median};
+}
 
 /* ---- classify module type by long edge ---- */
 function classifyModule(v){const {len}=longEdge(v);let best=null,bd=1e9;for(const f of FMT){const d=Math.abs(len-f.mm/1000);if(d<bd){bd=d;best=f;}}return best?best.t:'L';}
@@ -481,7 +529,7 @@ function auraForBuilding(b){
       return {m2:Math.round(m2*10)/10, plates:plates.length, byWidth:byW, plateRects, frame, framePlates,
         pieces:plates.map(p=>({w:p.widthMM/1000,h:(p.heightMM||870)/1000}))};
     }
-    return {m2:0,plates:0,byWidth:{},pieces:[]};
+    // No SPT Aura belongs to this building: continue with automatic filling.
   }
   // PV*Sol / fallback: fill remaining roof area ROW BY ROW with the 3 Aura widths
   // (2770/1940/1380, largest first, remainder cut to >=400mm). Also counts vertical
@@ -541,14 +589,17 @@ function auraForBuilding(b){
   modR.forEach(m=>{let mny=1e9;m.forEach(([,y])=>{mny=Math.min(mny,y);});rowBottoms.push(mny);});
   rowBottoms.sort((a,b)=>a-b);
   const rowAnchors=[];rowBottoms.forEach(y=>{if(!rowAnchors.length||Math.abs(y-rowAnchors[rowAnchors.length-1])>0.30)rowAnchors.push(y);});
-  // build full row grid: extend module row anchors downward/upward by ROW to cover whole roof
-  let modTop=-1e9, modBot=1e9; modR.forEach(m=>m.forEach(([,y])=>{modTop=Math.max(modTop,y);modBot=Math.min(modBot,y);}));
-  if(modTop===-1e9){modTop=y1;modBot=y0;}
-  const anchor=rowAnchors.length?rowAnchors[0]:y0; // a real module row bottom
-  // rows: start at anchor, go down to y0 and up to modTop, all on the ROW pitch from the anchor
+  // Build a full row grid aligned to the real module-row pitch. Preserve the
+  // module-band coverage and extend it into usable roof above the modules,
+  // while keeping the final 300 mm below the ridge free for First plates.
+  let modTop=-1e9;modR.forEach(m=>m.forEach(([,y])=>{modTop=Math.max(modTop,y);}));
+  if(modTop===-1e9)modTop=y0;
+  const anchor=rowAnchors.length?rowAnchors[0]:y0;
+  const layoutTop=Math.max(modTop+0.05,y1-0.30);
+  const lastBottom=Math.max(modTop+0.02,layoutTop-PH+0.02);
   const rowYs=[];
   for(let y=anchor; y>=y0-ROW; y-=ROW) rowYs.unshift(y);
-  for(let y=anchor+ROW; y<=modTop+0.02; y+=ROW) rowYs.push(y);
+  for(let y=anchor+ROW; y<=lastBottom; y+=ROW) rowYs.push(y);
 
   const framePlates=[]; // {x,y,w,h} im Rotationsrahmen — Basis für den Aura-Editor
   // Intelligente Auffüllung: Standardbreiten zuerst (grösste zuerst, Stösse folgen dem
@@ -579,7 +630,7 @@ function auraForBuilding(b){
   }
   rowYs.forEach(yb=>{
     const yc=yb+PH/2;
-    if(yb+PH > modTop+0.05) return; // never above module band (First strip stays free)
+    if(yb+PH > layoutTop+0.02) return; // reserve the 300 mm First strip
     // free runs over the full plate band of this row
     const runs=[]; let cur=null;
     for(let x=x0; x<=x1; x+=STEP){
@@ -674,7 +725,7 @@ function buildEdgeCandidates(){
   // dedupe by midpoint
   const seen=new Set(),out=[];
   edges.forEach(e=>{const k=e.m[0].toFixed(1)+','+e.m[1].toFixed(1);if(seen.has(k))return;seen.add(k);out.push(e);});
-  S.edgeCands=out.map((e,i)=>({id:i,a:e.a,b:e.b,len:e.L,interior:e.interior,m:e.m}));
+  S.edgeCands=out.map((e,i)=>({id:i,pi:e.pi,a:e.a,b:e.b,len:e.L,interior:e.interior,m:e.m,an:e.an}));
   // preset from existing edge layers if present
   const layerMap={First:'First',Seitenanschlussprofil:'Ort',Grat:'Grat',Kehle:'Kehle',Schneefang:'Schneefang'};
   S.preset=[];
@@ -683,6 +734,21 @@ function buildEdgeCandidates(){
       const v=e.verts;for(let i=0;i<v.length-1;i++){if(H(v[i],v[i+1])>0.3)S.preset.push({a:v[i],b:v[i+1],len:H(v[i],v[i+1]),type});}
     });
   });
+}
+/* PV*Sol has no explicit snow-guard objects. Preset the lowest carrier edge
+   parallel to the dominant module axis on each roof face. Manual snow marking
+   still overrides these presets through the normal per-type override logic. */
+function presetSchneefangEaves(){
+  if((S.sptSnow&&S.sptSnow.length)||(S.roofs&&S.roofs.length)||!S.mods.length)return;
+  if(S.preset&&S.preset.some(p=>p.type==='Schneefang'))return;
+  const aa=S.mods.map(m=>{let a=longEdge(m.v).ang;while(a>=Math.PI/2)a-=Math.PI;while(a< -Math.PI/2)a+=Math.PI;return a;}).sort((a,b)=>a-b);
+  const dom=aa[Math.floor(aa.length/2)],nx=-Math.sin(dom),ny=Math.cos(dom),byFace={};
+  S.edgeCands.forEach(e=>{
+    let ea=Math.atan2(e.b[1]-e.a[1],e.b[0]-e.a[0]);while(ea>=Math.PI/2)ea-=Math.PI;while(ea< -Math.PI/2)ea+=Math.PI;
+    const da=Math.abs(ea-dom);if(Math.min(da,Math.PI-da)>12*Math.PI/180)return;
+    (byFace[e.pi]=byFace[e.pi]||[]).push({e,p:e.m[0]*nx+e.m[1]*ny});
+  });
+  Object.values(byFace).forEach(list=>{const lo=Math.min(...list.map(x=>x.p));list.filter(x=>x.p<=lo+0.15).forEach(x=>S.preset.push({a:x.e.a,b:x.e.b,len:x.e.len,type:'Schneefang',autoEave:true}));});
 }
 function nearestBuilding(pt){let best=null,bd=1e18;for(const b of S.buildings){const d=(pt[0]-b.cx)**2+(pt[1]-b.cy)**2;if(d<bd){bd=d;best=b;}}return best?best.name:'H1';}
 
@@ -906,8 +972,26 @@ function analyzeGrid(b){
   return {fugenProfile:fug, ncol, nrow:Object.keys(rows).length};
 }
 
+function closedLayerPolys(entities){
+  const polys=(entities||[]).filter(e=>e.verts&&e.verts.length>=3).map(e=>e.verts);
+  const segs=(entities||[]).filter(e=>e.verts&&e.verts.length===2).map(e=>[e.verts[0],e.verts[1]]);
+  const tol=0.01;
+  while(segs.length){
+    const seed=segs.pop(),path=[seed[0],seed[1]];let guard=0;
+    while(segs.length&&guard++<10000&&H(path[path.length-1],path[0])>tol){
+      const end=path[path.length-1];
+      const i=segs.findIndex(s=>H(s[0],end)<=tol||H(s[1],end)<=tol);
+      if(i<0)break;
+      const seg=segs.splice(i,1)[0];path.push(H(seg[0],end)<=tol?seg[1]:seg[0]);
+    }
+    if(path.length>=4&&H(path[path.length-1],path[0])<=tol)polys.push(path);
+  }
+  return polys;
+}
+
 /* ---- parse entry ---- */
 function onParsed(resolved){
+  resolved=normalizeScale(resolved).resolved.map(e=>({...e,layer:canonicalLayer(e.layer)}));
   S.raw=resolved;const byL={};resolved.forEach(e=>{(byL[e.layer]=byL[e.layer]||[]).push(e);});S.layers=byL;
   const modP=(byL['MODULES']||[]).filter(e=>e.verts.length>=4);
   if(!modP.length)return {ok:false,msg:'Kein Layer „MODULES" gefunden.'};
@@ -943,9 +1027,9 @@ function onParsed(resolved){
   // Layer „Aura" (DXF/DWG): geschlossene Polylinien = vom Anwender gezeichnetes
   // Platten-Layout -> als Nutzer-Layout übernehmen (hat Vorrang vor der Automatik)
   S.auraUser=null; S.auraSel=null; S.auraAnchor=null; S.auraImported=0;
-  const auraLay=Object.keys(byL).find(k=>k.toLowerCase()==='aura');
-  if(auraLay){
-    const polys=byL[auraLay].filter(e=>e.verts&&e.verts.length>=4).map(e=>e.verts);
+  const auraLay='AURA';
+  if(byL[auraLay]){
+    const polys=closedLayerPolys(byL[auraLay]);
     if(polys.length){
       S.auraUser={};
       polys.forEach(v=>{
@@ -963,6 +1047,7 @@ function onParsed(resolved){
     }
   }
   buildEdgeCandidates();
+  presetSchneefangEaves();
   // Schneefang erkannt (SPT-Marker oder DXF-Layer) -> Berechnung automatisch einschalten
   if((S.sptSnow&&S.sptSnow.length)||(S.preset&&S.preset.some(p=>p.type==='Schneefang')))S.params.schneefang=true;
   return {ok:true};
@@ -976,17 +1061,18 @@ function parseProjects(projects){
   const comb=[],aura=[],roofs=[];
   let cursor=null;
   projects.forEach(pr=>{
+    const norm=normalizeScale(pr.resolved),resolved=norm.resolved,f=norm.factor;
     let x0=1e9,x1=-1e9;
     const eat=v=>v.forEach(([x])=>{x0=Math.min(x0,x);x1=Math.max(x1,x);});
-    pr.resolved.forEach(e=>eat(e.verts));
-    (pr.sptRoofs||[]).forEach(r=>eat(r.verts));
+    resolved.forEach(e=>eat(e.verts));
+    (pr.sptRoofs||[]).forEach(r=>eat(r.verts.map(([x,y])=>[x/f,y/f])));
     if(x0>x1) return;
     const dx=(cursor==null)?0:(cursor+8-x0);
     cursor=(cursor==null)?x1:(cursor+8+(x1-x0));
     const off=v=>v.map(([x,y])=>[x+dx,y]);
-    pr.resolved.forEach(e=>comb.push({layer:e.layer,verts:off(e.verts),modType:e.modType,name:e.name}));
-    (pr.sptAura||[]).forEach(p2=>aura.push({widthMM:p2.widthMM,heightMM:p2.heightMM,verts:off(p2.verts)}));
-    (pr.sptRoofs||[]).forEach(r=>roofs.push({verts:off(r.verts),pitch:r.pitch,ridge:r.ridge?off(r.ridge):null}));
+    resolved.forEach(e=>comb.push({layer:e.layer,verts:off(e.verts),modType:e.modType,name:e.name}));
+    (pr.sptAura||[]).forEach(p2=>aura.push({widthMM:p2.widthMM,heightMM:p2.heightMM,verts:off(p2.verts.map(([x,y])=>[x/f,y/f]))}));
+    (pr.sptRoofs||[]).forEach(r=>{const rv=r.verts.map(([x,y])=>[x/f,y/f]),ridge=r.ridge?r.ridge.map(([x,y])=>[x/f,y/f]):null;roofs.push({verts:off(rv),pitch:r.pitch,ridge:ridge?off(ridge):null});});
   });
   window.__SPT_AURA=aura;window.__SPT_ROOFS=roofs;
   return onParsed(comb);
@@ -1179,7 +1265,7 @@ function buildPills(){const box=$('#pills');box.innerHTML='';const S=St();const 
 
 /* ---- canvas ---- */
 function computeView(){
-  const S=St(),cv=$('#plan');const cw=cv.clientWidth||900,ch=560;VIEW.W=cw;VIEW.H=ch;
+  const S=St(),cv=$('#plan'),host=cv.parentElement;const cw=Math.max(280,Math.floor((host&&host.clientWidth)||cv.clientWidth||900)),ch=560;VIEW.W=cw;VIEW.H=ch;
   const mods=S.activeBuilding==='ALL'?S.mods:S.buildings.find(b=>b.name===S.activeBuilding).mods;
   const allV=[...mods.map(m=>m.v),...S.carriers,...S.env];
   let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;allV.forEach(v=>v.forEach(([x,y])=>{minx=Math.min(minx,x);miny=Math.min(miny,y);maxx=Math.max(maxx,x);maxy=Math.max(maxy,y);}));
@@ -1196,7 +1282,7 @@ function S2W(px,py){const z=VIEW.zoom||1;const sx=(px-(VIEW.panx||0)-VIEW.W/2)/z
 
 function drawPlan(){
   const S=St(),cv=$('#plan'),ctx=cv.getContext('2d');const dpr=window.devicePixelRatio||1;
-  computeView();cv.width=VIEW.W*dpr;cv.height=VIEW.H*dpr;cv.style.height=VIEW.H+'px';ctx.setTransform(dpr,0,0,dpr,0,0);
+  computeView();cv.width=VIEW.W*dpr;cv.height=VIEW.H*dpr;cv.style.width=VIEW.W+'px';cv.style.height=VIEW.H+'px';ctx.setTransform(dpr,0,0,dpr,0,0);
   ctx.clearRect(0,0,VIEW.W,VIEW.H);
   const mods=S.activeBuilding==='ALL'?S.mods:S.buildings.find(b=>b.name===S.activeBuilding).mods;
   const poly=(v,st,fl,w,dash)=>{ctx.beginPath();v.forEach((p,i)=>{const[X,Y]=W2S(p[0],p[1]);i?ctx.lineTo(X,Y):ctx.moveTo(X,Y);});if(fl){ctx.fillStyle=fl;ctx.fill();}if(st){ctx.setLineDash(dash||[]);ctx.strokeStyle=st;ctx.lineWidth=w||1;ctx.stroke();ctx.setLineDash([]);}};
@@ -1318,7 +1404,7 @@ function drawPlan(){
 }
 
 /* ---- canvas interaction ---- */
-function canvasXY(ev){const cv=$('#plan'),r=cv.getBoundingClientRect();return [ev.clientX-r.left, ev.clientY-r.top];}
+function canvasXY(ev){const cv=$('#plan'),r=cv.getBoundingClientRect();return [(ev.clientX-r.left)*VIEW.W/r.width,(ev.clientY-r.top)*VIEW.H/r.height];}
 function nearestCandidate(sx,sy){
   const S=St();let best=null,bd=12; // px threshold
   S.edgeCands.forEach(e=>{const[ax,ay]=W2S(e.a[0],e.a[1]),[bx,by]=W2S(e.b[0],e.b[1]);const d=ptSeg(sx,sy,ax,ay,bx,by);if(d<bd){bd=d;best=e;}});
@@ -1564,7 +1650,32 @@ function renderNote(){const S=St(),p=S.params,n=$('#assumptions');const warn=p.h
 /* ---- export ---- */
 function buildAOA(){const S=St(),r=S.result,B=r.buildings,multiB=B.length>1,head=['Artikel-Nr.','Bezeichnung','Abmessung','Einheit',...(multiB?B:[]),'Anzahl'],aoa=[head];r.rows.forEach(row=>{if(row.group){aoa.push([row.group]);return;}if(!row.total && !/informativ|Restfläche/.test(row.art))return;aoa.push([row.artNr||'',row.art,row.dim||'',row.unit,...(multiB?B.map(b=>row.perB[b]||0):[]),row.total]);});return {aoa,B};}
 function exportCSV(){const {aoa}=buildAOA();const csv=aoa.map(r=>r.map(c=>{const s=String(c==null?'':c);return /[";\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}).join(';')).join('\r\n');dl(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}),'Materialliste_Sunskin_RoofLap.csv');}
-function exportXlsx(){if(typeof XLSX==='undefined'){exportCSV();return;}const S=St(),{aoa,B}=buildAOA();const ws=XLSX.utils.aoa_to_sheet(aoa);ws['!cols']=[{wch:6},{wch:54},{wch:8},...B.map(()=>({wch:8})),{wch:9}];const ov=[['Gebäude','L','M','XL','Total']];S.buildings.forEach(b=>{let l=0,m=0,x=0;b.mods.forEach(md=>md.type==='L'?l++:md.type==='M'?m++:x++);ov.push([b.name,l,m,x,l+m+x]);});const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(ov),'Übersicht');XLSX.utils.book_append_sheet(wb,ws,'Materialliste');XLSX.writeFile(wb,'Materialliste_Sunskin_RoofLap.xlsx');}
+function xmlEsc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');}
+function xlsxCol(n){let s='';for(n++;n>0;n=Math.floor((n-1)/26))s=String.fromCharCode(65+(n-1)%26)+s;return s;}
+function xlsxSheet(aoa){
+  const rows=aoa.map((row,ri)=>'<row r="'+(ri+1)+'">'+row.map((v,ci)=>{const ref=xlsxCol(ci)+(ri+1);if(typeof v==='number'&&Number.isFinite(v))return '<c r="'+ref+'"><v>'+v+'</v></c>';return '<c r="'+ref+'" t="inlineStr"><is><t xml:space="preserve">'+xmlEsc(v)+'</t></is></c>';}).join('')+'</row>').join('');
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'+rows+'</sheetData></worksheet>';
+}
+function crc32(bytes){if(!crc32.t){crc32.t=Array.from({length:256},(_,n)=>{let c=n;for(let k=0;k<8;k++)c=(c&1)?0xedb88320^(c>>>1):c>>>1;return c>>>0;});}let c=0xffffffff;for(const b of bytes)c=crc32.t[(c^b)&255]^(c>>>8);return(c^0xffffffff)>>>0;}
+function zipStore(files){
+  const enc=new TextEncoder(),local=[],central=[];let offset=0,centralSize=0;
+  const now=new Date(),dt=((now.getHours()<<11)|(now.getMinutes()<<5)|(now.getSeconds()>>1))&65535,dd=(((now.getFullYear()-1980)<<9)|((now.getMonth()+1)<<5)|now.getDate())&65535;
+  const put=(dv,o,v,n)=>n===2?dv.setUint16(o,v,true):dv.setUint32(o,v>>>0,true);
+  files.forEach(([name,text])=>{const nb=enc.encode(name),data=enc.encode(text),crc=crc32(data),lh=new Uint8Array(30),ld=new DataView(lh.buffer);put(ld,0,0x04034b50,4);put(ld,4,20,2);put(ld,6,0x0800,2);put(ld,8,0,2);put(ld,10,dt,2);put(ld,12,dd,2);put(ld,14,crc,4);put(ld,18,data.length,4);put(ld,22,data.length,4);put(ld,26,nb.length,2);put(ld,28,0,2);local.push(lh,nb,data);
+    const ch=new Uint8Array(46),cd=new DataView(ch.buffer);put(cd,0,0x02014b50,4);put(cd,4,20,2);put(cd,6,20,2);put(cd,8,0x0800,2);put(cd,10,0,2);put(cd,12,dt,2);put(cd,14,dd,2);put(cd,16,crc,4);put(cd,20,data.length,4);put(cd,24,data.length,4);put(cd,28,nb.length,2);put(cd,30,0,2);put(cd,32,0,2);put(cd,34,0,2);put(cd,36,0,2);put(cd,38,0,4);put(cd,42,offset,4);central.push(ch,nb);centralSize+=ch.length+nb.length;offset+=lh.length+nb.length+data.length;});
+  const end=new Uint8Array(22),ed=new DataView(end.buffer);put(ed,0,0x06054b50,4);put(ed,4,0,2);put(ed,6,0,2);put(ed,8,files.length,2);put(ed,10,files.length,2);put(ed,12,centralSize,4);put(ed,16,offset,4);put(ed,20,0,2);return new Blob([...local,...central,end],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+}
+function exportXlsx(){
+  const S=St(),{aoa}=buildAOA(),ov=[['Gebäude','L','M','XL','Total']];S.buildings.forEach(b=>{let l=0,m=0,x=0;b.mods.forEach(md=>md.type==='L'?l++:md.type==='M'?m++:x++);ov.push([b.name,l,m,x,l+m+x]);});
+  const files=[
+    ['[Content_Types].xml','<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>'],
+    ['_rels/.rels','<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'],
+    ['xl/workbook.xml','<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Übersicht" sheetId="1" r:id="rId1"/><sheet name="Materialliste" sheetId="2" r:id="rId2"/></sheets></workbook>'],
+    ['xl/_rels/workbook.xml.rels','<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'],
+    ['xl/styles.xml','<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="1"><fill><patternFill patternType="none"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="1"><xf xfId="0"/></cellXfs></styleSheet>'],
+    ['xl/worksheets/sheet1.xml',xlsxSheet(ov)],['xl/worksheets/sheet2.xml',xlsxSheet(aoa)]
+  ];dl(zipStore(files),'Materialliste_Sunskin_RoofLap.xlsx');
+}
 function dl(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},100);}
 
 /* ---- master ---- */
