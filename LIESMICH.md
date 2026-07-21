@@ -48,6 +48,11 @@ einen lokalen Webserver geöffnet werden (Browser-Sicherheit verbietet WASM-Lade
    markiert wird.
 4. Materialliste pro Gebäude prüfen, als Excel/CSV exportieren.
 
+Die DXF-Skalierung wird bevorzugt aus der tatsächlichen Modulgröße erkannt;
+Layernamen wie `MODULES`, `Modules` oder `modules` sind gleichwertig. Bei einem
+Dach ohne Module verwendet der Importer die in `$INSUNITS` gespeicherte
+Zeichnungseinheit sowie `MODULAREA` bzw. das vorhandene Aura-Layout.
+
 ## Aura-Platten
 - **Auto-Layout (intelligente Auffüllung):** Standardbreiten (1380/1940/2770)
   strikt am Modulraster; Restlücken ab 400 mm werden mit Zuschnittplatten
