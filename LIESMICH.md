@@ -63,9 +63,11 @@ einen lokalen Webserver geöffnet werden (Browser-Sicherheit verbietet WASM-Lade
   Klick auf leere Fläche setzt den **Einfügepunkt (×)** — „+ Platte" erzeugt
   die Platte dort (CAD-Prinzip). „– Platte löschen" (oder Entf),
   „↺ Auto-Layout" stellt die Automatik wieder her.
-- **Layer „Aura" in der Datei:** Rechtecke auf einem Layer namens `Aura`
+- **Layer „Aura" in der Datei:** Rechtecke auf einem Layer namens Aura
   (DXF oder DWG) werden 1:1 als Platten-Layout übernommen und sind im Editor
-  weiter bearbeitbar.
+  weiter bearbeitbar. Der Name wird ohne Beachtung der Groß-/Kleinschreibung
+  erkannt (auch XRef-Namen wie Projekt|Aura und Aura-Platten). Unterstützt
+  werden geschlossene LWPOLYLINE/POLYLINE sowie Rechtecke aus vier Linien.
 
 ## Mehrere Dächer / ein Objekt
 Mit **„+ Dach hinzufügen"** (über der Materialliste) weitere DXF/DWG-Dateien

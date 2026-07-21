@@ -282,6 +282,7 @@ function parseDXF(text){
           else if(c===41) ent.dxf.sx=parseFloat(v);
           else if(c===42) ent.dxf.sy=parseFloat(v);
           else if(c===50) ent.dxf.rot=parseFloat(v);
+          else if(c===70) ent.dxf.flags=parseInt(v,10)||0;
           else if(c===11) ent.dxf.x2=parseFloat(v);
           else if(c===21) ent.dxf.y2=parseFloat(v);
           if(type==='LWPOLYLINE'){
@@ -297,6 +298,28 @@ function parseDXF(text){
     }
     return out;
   }
+  // AutoCAD may write a closed shape either as LWPOLYLINE or as the older
+  // POLYLINE + VERTEX ... + SEQEND sequence. Convert both to one representation.
+  function normalizeEntities(list){
+    const out=[];
+    for(let n=0;n<list.length;n++){
+      const e=list[n];
+      if(e.type==='POLYLINE'){
+        const verts=[];let j=n+1;
+        while(j<list.length&&list[j].type!=='SEQEND'){
+          const v=list[j];if(v.type==='VERTEX'&&Number.isFinite(v.dxf.x)&&Number.isFinite(v.dxf.y))verts.push([v.dxf.x,v.dxf.y]);j++;
+        }
+        if(verts.length>=2){const p={...e,type:'LWPOLYLINE',verts};if((e.dxf.flags&1)&&dist(verts[0],verts[verts.length-1])>1e-9)p.verts.push([...verts[0]]);out.push(p);}
+        n=j;
+        continue;
+      }
+      if(e.type==='VERTEX'||e.type==='SEQEND')continue;
+      if(e.type==='LWPOLYLINE'&&(e.dxf.flags&1)&&e.verts.length>2&&dist(e.verts[0],e.verts[e.verts.length-1])>1e-9)e.verts.push([...e.verts[0]]);
+      out.push(e);
+    }
+    return out;
+  }
+  function dist(a,b){return Math.hypot(b[0]-a[0],b[1]-a[1]);}
   // walk sections
   while(i<toks.length){
     const [code,val]=toks[i];
@@ -311,14 +334,14 @@ function parseDXF(text){
           if(toks[i][0]===0 && toks[i][1]==='BLOCK'){
             let bname=''; i++;
             while(i<toks.length && toks[i][0]!==0){ if(toks[i][0]===2) bname=toks[i][1]; i++; }
-            const ents=readEntities();
+            const ents=normalizeEntities(readEntities());
             blocks[bname]=ents;
             // skip ENDBLK
             if(i<toks.length && toks[i][0]===0 && toks[i][1]==='ENDBLK') i++;
           } else i++;
         }
       } else if(sname==='ENTITIES'){
-        const ents=readEntities();
+        const ents=normalizeEntities(readEntities());
         for(const e of ents) entities.push(e);
       }
       continue;
@@ -340,15 +363,17 @@ function parseDXF(text){
       const ox=e.dxf.x||0, oy=e.dxf.y||0, sx=e.dxf.sx||1, sy=e.dxf.sy||1, rot=(e.dxf.rot||0)*Math.PI/180;
       const cos=Math.cos(rot), sin=Math.sin(rot);
       for(const be of blocks[e.dxf.name]){
+        // Layer 0 inherits the INSERT layer; explicitly assigned layers stay intact.
+        const childLayer=(!be.layer||be.layer==='0')?e.layer:be.layer;
         if(be.type==='LWPOLYLINE'){
           const vs=be.verts.map(([x,y])=>{
             const X=x*sx, Y=y*sy;
             return [ox+X*cos-Y*sin, oy+X*sin+Y*cos];
           });
-          resolved.push({layer:e.layer,type:'POLY',verts:vs});
+          resolved.push({layer:childLayer,type:'POLY',verts:vs});
         } else if(be.type==='LINE'){
           const tr=([x,y])=>{const X=x*sx,Y=y*sy;return [ox+X*cos-Y*sin,oy+X*sin+Y*cos];};
-          resolved.push({layer:e.layer,type:'POLY',verts:[tr([be.dxf.x,be.dxf.y]),tr([be.dxf.x2,be.dxf.y2])]});
+          resolved.push({layer:childLayer,type:'POLY',verts:[tr([be.dxf.x,be.dxf.y]),tr([be.dxf.x2,be.dxf.y2])]});
         }
       }
     } else {
@@ -386,6 +411,15 @@ const EDGE_TYPES = {
   Schneefang:{col:'#7a4fc0',label:'Schneefang'}
 };
 const FMT=[{t:'L',mm:1380},{t:'M',mm:1010},{t:'XL',mm:1940}];
+
+function canonicalLayer(name){
+  const leaf=String(name||'0').trim().split('|').pop().trim();
+  const key=leaf.toUpperCase().replace(/[\s_.-]+/g,'');
+  if(key.startsWith('AURA'))return 'AURA';
+  const known={MODULES:'MODULES',MODULAREA:'MODULAREA',MODULECARRIERS:'MODULECARRIERS',BARREDAREAS:'BARREDAREAS',ENVIRONMENT:'ENVIRONMENT',
+    FIRST:'First',SEITENANSCHLUSSPROFIL:'Seitenanschlussprofil',GRAT:'Grat',KEHLE:'Kehle',SCHNEEFANG:'Schneefang',__SNOWGUARD__:'__SNOWGUARD__'};
+  return known[key]||leaf;
+}
 
 /* ---- geometry ---- */
 const H=(a,b)=>Math.hypot(b[0]-a[0],b[1]-a[1]);
@@ -495,7 +529,7 @@ function auraForBuilding(b){
       return {m2:Math.round(m2*10)/10, plates:plates.length, byWidth:byW, plateRects, frame, framePlates,
         pieces:plates.map(p=>({w:p.widthMM/1000,h:(p.heightMM||870)/1000}))};
     }
-    return {m2:0,plates:0,byWidth:{},pieces:[]};
+    // No SPT Aura belongs to this building: continue with automatic filling.
   }
   // PV*Sol / fallback: fill remaining roof area ROW BY ROW with the 3 Aura widths
   // (2770/1940/1380, largest first, remainder cut to >=400mm). Also counts vertical
@@ -555,14 +589,17 @@ function auraForBuilding(b){
   modR.forEach(m=>{let mny=1e9;m.forEach(([,y])=>{mny=Math.min(mny,y);});rowBottoms.push(mny);});
   rowBottoms.sort((a,b)=>a-b);
   const rowAnchors=[];rowBottoms.forEach(y=>{if(!rowAnchors.length||Math.abs(y-rowAnchors[rowAnchors.length-1])>0.30)rowAnchors.push(y);});
-  // build full row grid: extend module row anchors downward/upward by ROW to cover whole roof
-  let modTop=-1e9, modBot=1e9; modR.forEach(m=>m.forEach(([,y])=>{modTop=Math.max(modTop,y);modBot=Math.min(modBot,y);}));
-  if(modTop===-1e9){modTop=y1;modBot=y0;}
-  const anchor=rowAnchors.length?rowAnchors[0]:y0; // a real module row bottom
-  // rows: start at anchor, go down to y0 and up to modTop, all on the ROW pitch from the anchor
+  // Build a full row grid aligned to the real module-row pitch. Preserve the
+  // module-band coverage and extend it into usable roof above the modules,
+  // while keeping the final 300 mm below the ridge free for First plates.
+  let modTop=-1e9;modR.forEach(m=>m.forEach(([,y])=>{modTop=Math.max(modTop,y);}));
+  if(modTop===-1e9)modTop=y0;
+  const anchor=rowAnchors.length?rowAnchors[0]:y0;
+  const layoutTop=Math.max(modTop+0.05,y1-0.30);
+  const lastBottom=Math.max(modTop+0.02,layoutTop-PH+0.02);
   const rowYs=[];
   for(let y=anchor; y>=y0-ROW; y-=ROW) rowYs.unshift(y);
-  for(let y=anchor+ROW; y<=modTop+0.02; y+=ROW) rowYs.push(y);
+  for(let y=anchor+ROW; y<=lastBottom; y+=ROW) rowYs.push(y);
 
   const framePlates=[]; // {x,y,w,h} im Rotationsrahmen — Basis für den Aura-Editor
   // Intelligente Auffüllung: Standardbreiten zuerst (grösste zuerst, Stösse folgen dem
@@ -593,7 +630,7 @@ function auraForBuilding(b){
   }
   rowYs.forEach(yb=>{
     const yc=yb+PH/2;
-    if(yb+PH > modTop+0.05) return; // never above module band (First strip stays free)
+    if(yb+PH > layoutTop+0.02) return; // reserve the 300 mm First strip
     // free runs over the full plate band of this row
     const runs=[]; let cur=null;
     for(let x=x0; x<=x1; x+=STEP){
@@ -935,9 +972,26 @@ function analyzeGrid(b){
   return {fugenProfile:fug, ncol, nrow:Object.keys(rows).length};
 }
 
+function closedLayerPolys(entities){
+  const polys=(entities||[]).filter(e=>e.verts&&e.verts.length>=3).map(e=>e.verts);
+  const segs=(entities||[]).filter(e=>e.verts&&e.verts.length===2).map(e=>[e.verts[0],e.verts[1]]);
+  const tol=0.01;
+  while(segs.length){
+    const seed=segs.pop(),path=[seed[0],seed[1]];let guard=0;
+    while(segs.length&&guard++<10000&&H(path[path.length-1],path[0])>tol){
+      const end=path[path.length-1];
+      const i=segs.findIndex(s=>H(s[0],end)<=tol||H(s[1],end)<=tol);
+      if(i<0)break;
+      const seg=segs.splice(i,1)[0];path.push(H(seg[0],end)<=tol?seg[1]:seg[0]);
+    }
+    if(path.length>=4&&H(path[path.length-1],path[0])<=tol)polys.push(path);
+  }
+  return polys;
+}
+
 /* ---- parse entry ---- */
 function onParsed(resolved){
-  resolved=normalizeScale(resolved).resolved;
+  resolved=normalizeScale(resolved).resolved.map(e=>({...e,layer:canonicalLayer(e.layer)}));
   S.raw=resolved;const byL={};resolved.forEach(e=>{(byL[e.layer]=byL[e.layer]||[]).push(e);});S.layers=byL;
   const modP=(byL['MODULES']||[]).filter(e=>e.verts.length>=4);
   if(!modP.length)return {ok:false,msg:'Kein Layer „MODULES" gefunden.'};
@@ -973,9 +1027,9 @@ function onParsed(resolved){
   // Layer „Aura" (DXF/DWG): geschlossene Polylinien = vom Anwender gezeichnetes
   // Platten-Layout -> als Nutzer-Layout übernehmen (hat Vorrang vor der Automatik)
   S.auraUser=null; S.auraSel=null; S.auraAnchor=null; S.auraImported=0;
-  const auraLay=Object.keys(byL).find(k=>k.toLowerCase()==='aura');
-  if(auraLay){
-    const polys=byL[auraLay].filter(e=>e.verts&&e.verts.length>=4).map(e=>e.verts);
+  const auraLay='AURA';
+  if(byL[auraLay]){
+    const polys=closedLayerPolys(byL[auraLay]);
     if(polys.length){
       S.auraUser={};
       polys.forEach(v=>{
