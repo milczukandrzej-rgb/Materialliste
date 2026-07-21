@@ -96,6 +96,10 @@
   /* ---- Canvas / preview ---- */
   .preview{position:relative;background:#fbfbf8;border-radius:8px;overflow:hidden;border:1px solid var(--line)}
   #plan{display:block;width:100%;height:auto;background:#fbfbf8}
+  .editor-panel.expanded{position:fixed;inset:8px;z-index:1000;margin:0!important;display:flex;flex-direction:column;background:#fff}
+  .editor-panel.expanded .preview{flex:1;min-height:320px;border-radius:0}
+  .editor-panel.expanded .legend,.editor-panel.expanded #auratoggle{display:none}
+  body.editor-open{overflow:hidden}
   .legend{display:flex;gap:16px;flex-wrap:wrap;padding:12px 18px;border-top:1px solid var(--line);font-family:var(--mono);font-size:11px;color:#555}
   .legend i{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:6px;vertical-align:-1px}
 
@@ -108,6 +112,7 @@
   .edgebtn.on i{background:#fff!important}
   .edgebtn.ghost{color:#999}
   .drawtype{font-family:var(--mono);font-size:12px;padding:5px 8px;border:1px solid var(--line);border-radius:6px}
+  .auradim{width:88px!important;padding:5px 7px!important;font-size:12px!important}
   .editorhint{font-family:var(--mono);font-size:11px;color:#7a7a73;padding:0 18px 12px}
 
   /* ---- Stats strip ---- */
@@ -194,7 +199,7 @@
       </div>
       <!-- right: preview + results -->
       <div>
-        <div class="panel" style="margin-bottom:24px">
+        <div class="panel editor-panel" id="editorpanel" style="margin-bottom:24px">
           <h2>Kanten-Editor <span id="planmeta" style="font-family:var(--mono);font-size:11px;color:#999;text-transform:none;letter-spacing:0"></span></h2>
           <div class="palette" id="palette"></div>
           <div class="editorhint" id="editorhint"></div>
@@ -449,6 +454,18 @@ function classifyModule(v){const {len}=longEdge(v);let best=null,bd=1e9;for(cons
 
 /* ---- cluster modules into buildings ---- */
 function clusterBuildings(mods){
+  // Never merge geometry from separately imported files, even when their
+  // coordinates or proximity would make the spatial clustering overlap.
+  const projectKeys=[...new Set(mods.map(m=>m.projectId==null?'legacy':String(m.projectId)))];
+  if(projectKeys.length>1){
+    const all=[];
+    projectKeys.forEach(key=>{
+      const group=mods.filter(m=>(m.projectId==null?'legacy':String(m.projectId))===key);
+      clusterBuildings(group).forEach(b=>{b.projectId=group[0].projectId;b.projectName=group[0].projectName;all.push(b);});
+    });
+    all.forEach((b,i)=>{b.name='H'+(i+1);});
+    return all;
+  }
   const cents=mods.map(m=>centroid(m.v));
   let minx=1e9,miny=1e9;cents.forEach(([x,y])=>{minx=Math.min(minx,x);miny=Math.min(miny,y);});
   const cell=0.5,dil=6;
@@ -995,7 +1012,7 @@ function onParsed(resolved){
   S.raw=resolved;const byL={};resolved.forEach(e=>{(byL[e.layer]=byL[e.layer]||[]).push(e);});S.layers=byL;
   const modP=(byL['MODULES']||[]).filter(e=>e.verts.length>=4);
   if(!modP.length)return {ok:false,msg:'Kein Layer „MODULES" gefunden.'};
-  S.mods=modP.map(e=>({v:e.verts,type:e.modType||classifyModule(e.verts)}));
+  S.mods=modP.map(e=>({v:e.verts,type:e.modType||classifyModule(e.verts),projectId:e.projectId,projectName:e.projectName}));
   S.carriers=(byL['MODULECARRIERS']||[]).filter(e=>e.verts.length>=3).map(e=>e.verts);
   S.barred=(byL['BARREDAREAS']||[]).filter(e=>e.verts.length>=4).map(e=>e.verts);
   // PV*Sol exports the roof outline + cut-outs on layer MODULAREA.
@@ -1060,7 +1077,7 @@ function onParsed(resolved){
 function parseProjects(projects){
   const comb=[],aura=[],roofs=[];
   let cursor=null;
-  projects.forEach(pr=>{
+  projects.forEach((pr,projectId)=>{
     const norm=normalizeScale(pr.resolved),resolved=norm.resolved,f=norm.factor;
     let x0=1e9,x1=-1e9;
     const eat=v=>v.forEach(([x])=>{x0=Math.min(x0,x);x1=Math.max(x1,x);});
@@ -1070,9 +1087,9 @@ function parseProjects(projects){
     const dx=(cursor==null)?0:(cursor+8-x0);
     cursor=(cursor==null)?x1:(cursor+8+(x1-x0));
     const off=v=>v.map(([x,y])=>[x+dx,y]);
-    resolved.forEach(e=>comb.push({layer:e.layer,verts:off(e.verts),modType:e.modType,name:e.name}));
-    (pr.sptAura||[]).forEach(p2=>aura.push({widthMM:p2.widthMM,heightMM:p2.heightMM,verts:off(p2.verts.map(([x,y])=>[x/f,y/f]))}));
-    (pr.sptRoofs||[]).forEach(r=>{const rv=r.verts.map(([x,y])=>[x/f,y/f]),ridge=r.ridge?r.ridge.map(([x,y])=>[x/f,y/f]):null;roofs.push({verts:off(rv),pitch:r.pitch,ridge:ridge?off(ridge):null});});
+    resolved.forEach(e=>comb.push({layer:e.layer,verts:off(e.verts),modType:e.modType,name:e.name,projectId,projectName:pr.name}));
+    (pr.sptAura||[]).forEach(p2=>aura.push({widthMM:p2.widthMM,heightMM:p2.heightMM,verts:off(p2.verts.map(([x,y])=>[x/f,y/f])),projectId,projectName:pr.name}));
+    (pr.sptRoofs||[]).forEach(r=>{const rv=r.verts.map(([x,y])=>[x/f,y/f]),ridge=r.ridge?r.ridge.map(([x,y])=>[x/f,y/f]):null;roofs.push({verts:off(rv),pitch:r.pitch,ridge:ridge?off(ridge):null,projectId,projectName:pr.name});});
   });
   window.__SPT_AURA=aura;window.__SPT_ROOFS=roofs;
   return onParsed(comb);
@@ -1091,6 +1108,8 @@ window.__SUN={S,EDGE_TYPES,parse:onParsed,parseProjects,compute,nearestBuilding,
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
 const el=(t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e;};
 const A=()=>window.__SUN,St=()=>window.__SUN.S,ET=()=>window.__SUN.EDGE_TYPES;
+const visibleBuilding=bn=>St().activeBuilding==='ALL'||St().activeBuilding===bn;
+const visiblePoly=v=>St().activeBuilding==='ALL'||A().nearestBuilding(A().centroid(v))===St().activeBuilding;
 
 let VIEW={x0:0,y0:0,scale:1,baseScale:1,zoom:1,panx:0,pany:0,W:900,H:560,pad:24}; // canvas transform
 let drawStart=null; // free-draw first point (world)
@@ -1196,6 +1215,11 @@ function selNum(k,o,v){const s=el('select');s.dataset.k=k;o.forEach(([val,t])=>{
 function selStr(k,o,v){const s=el('select');s.dataset.k=k;o.forEach(([val,t])=>{const op=el('option',null,t);op.value=val;if(val===v)op.selected=true;s.appendChild(op);});return s;}
 function numIn(k,v,mn,mx){const i=el('input');i.type='number';i.dataset.k=k;i.value=v;i.min=mn;i.max=mx;return i;}
 function tog(k,l,v,h){const f=el('div','field'),lab=el('label','switch'),cb=el('input');cb.type='checkbox';cb.dataset.k=k;cb.checked=v;lab.appendChild(cb);lab.appendChild(el('span',null,'<b style="font-weight:600">'+l+'</b>'));f.appendChild(lab);if(h)f.appendChild(el('div','help',h));return f;}
+function setEditorExpanded(on){
+  const panel=$('#editorpanel');if(!panel)return;
+  panel.classList.toggle('expanded',!!on);document.body.classList.toggle('editor-open',!!on);
+  setTimeout(()=>{VIEW.zoom=1;VIEW.panx=0;VIEW.pany=0;drawPlan();},0);
+}
 
 /* ---- edge editor palette ---- */
 function buildPalette(){
@@ -1205,18 +1229,18 @@ function buildPalette(){
     const b=el('button','edgebtn'+(S.activeTool===t?' on':''));
     b.style.setProperty('--c',ET()[t].col);
     b.innerHTML=`<i style="background:${ET()[t].col}"></i>${ET()[t].label}`;
-    b.onclick=()=>{S.activeTool=(S.activeTool===t?null:t);drawStart=null;buildPalette();drawPlan();};
+    b.onclick=()=>{const leavingAura=S.activeTool==='__aura';S.activeTool=(S.activeTool===t?null:t);drawStart=null;if(leavingAura)setEditorExpanded(false);buildPalette();drawPlan();};
     box.appendChild(b);
   });
   const draw=el('button','edgebtn'+(S.activeTool==='__draw'?' on':''),'✎ Freihand');
-  draw.onclick=()=>{S.activeTool=(S.activeTool==='__draw'?null:'__draw');drawStart=null;buildPalette();drawPlan();};
+  draw.onclick=()=>{const leavingAura=S.activeTool==='__aura';S.activeTool=(S.activeTool==='__draw'?null:'__draw');drawStart=null;if(leavingAura)setEditorExpanded(false);buildPalette();drawPlan();};
   box.appendChild(draw);
   const aur=el('button','edgebtn'+(S.activeTool==='__aura'?' on':''),'⬚ Aura bearbeiten');
   aur.style.setProperty('--c','#5a7d3c');
-  aur.onclick=()=>{S.activeTool=(S.activeTool==='__aura'?null:'__aura');S.auraSel=null;drawStart=null;buildPalette();drawPlan();};
+  aur.onclick=()=>{const leaving=S.activeTool==='__aura';S.activeTool=(leaving?null:'__aura');S.auraSel=null;drawStart=null;if(leaving)setEditorExpanded(false);buildPalette();drawPlan();};
   box.appendChild(aur);
   const clr=el('button','edgebtn ghost','✕ Auswahl löschen');
-  clr.onclick=()=>{S.assign={};S.assignSnow={};S.drawnEdges=[];S.activeTool=null;drawStart=null;buildPalette();A().compute();renderAll();};
+  clr.onclick=()=>{S.assign={};S.assignSnow={};S.drawnEdges=[];S.activeTool=null;drawStart=null;setEditorExpanded(false);buildPalette();A().compute();renderAll();};
   box.appendChild(clr);
   // when draw tool active, need a target type
   if(S.activeTool==='__draw'){
@@ -1228,6 +1252,15 @@ function buildPalette(){
   }
   // Aura-Editor: Zusatzaktionen
   if(S.activeTool==='__aura'){
+    const panel=$('#editorpanel');
+    const full=el('button','edgebtn ghost',panel&&panel.classList.contains('expanded')?'Vollbild schließen':'⛶ Vollbild');
+    full.onclick=()=>{setEditorExpanded(!(panel&&panel.classList.contains('expanded')));buildPalette();};
+    box.appendChild(full);
+    const snap=el('button','edgebtn'+(S.auraSnap===false?'':' on'),'◉ Snap');
+    snap.style.setProperty('--c','#5a7d3c');
+    snap.title='Alt während des Ziehens deaktiviert Snap vorübergehend';
+    snap.onclick=()=>{S.auraSnap=S.auraSnap===false;buildPalette();drawPlan();};
+    box.appendChild(snap);
     const add=el('button','edgebtn','+ Platte');
     add.onclick=()=>{
       auraEnsureUser();
@@ -1249,25 +1282,43 @@ function buildPalette(){
       u.plates.splice(S.auraSel.i,1);S.auraSel=null;A().compute();renderAll();
     };
     box.appendChild(del);
-    const rst=el('button','edgebtn ghost','↺ Auto-Layout');
-    rst.onclick=()=>{S.auraUser=null;S.auraSel=null;A().compute();renderAll();};
+    const rst=el('button','edgebtn ghost','＋ Auto ergänzen');
+    rst.title='Ergänzt nur fehlende automatische Platten und behält das vorhandene Layout';
+    rst.onclick=()=>{auraMergeAuto();};
     box.appendChild(rst);
+    if(S.auraSel){
+      const u=S.auraUser&&S.auraUser[S.auraSel.b],p=u&&u.plates[S.auraSel.i];
+      if(p){
+        box.appendChild(el('span',null,'Breite mm'));
+        const wi=el('input','auradim');wi.type='number';wi.min=200;wi.max=5000;wi.step=1;wi.value=Math.round(p.w*1000);
+        wi.onchange=()=>{p.w=Math.max(.2,(parseFloat(wi.value)||200)/1000);A().compute();renderAll();};
+        box.appendChild(wi);
+        box.appendChild(el('span',null,'Höhe mm'));
+        const hi=el('input','auradim');hi.type='number';hi.min=200;hi.max=2000;hi.step=1;hi.value=Math.round(p.h*1000);
+        hi.onchange=()=>{p.h=Math.max(.2,(parseFloat(hi.value)||200)/1000);A().compute();renderAll();};
+        box.appendChild(hi);
+      }
+    }
   }
   $('#editorhint').textContent = S.activeTool==='__draw'
     ? 'Freihand: Startpunkt klicken, dann Endpunkt. Wird als '+(ET()[S.drawType]||{label:''}).label+' gezählt.'
-    : (S.activeTool==='__aura' ? 'Platte ziehen = verschieben · Kante ziehen = Breite/Höhe (rastet auf 1380/1940/2770, Modul- und Störflächenkanten) · Klick auf leere Fläche setzt den Einfügepunkt (×), „+ Platte" erzeugt die Platte dort · Entf löscht · „Auto-Layout" verwirft die manuellen Änderungen.'
+    : (S.activeTool==='__aura' ? 'Platte ziehen = verschieben · Kante ziehen = Größe · Alt hält Snap vorübergehend aus · exakte Maße stehen nach Auswahl oben in mm · „Auto ergänzen" behält das vorhandene Layout'+(S.auraMessage?' · '+S.auraMessage:'')
     : (S.activeTool==='Schneefang' ? 'Klicke Kanten an, um Schneefang zu setzen (zusätzlich zu Traufe möglich). Manuelle Markierung ersetzt die automatische Schneefang-Erkennung.'
     : (S.activeTool ? 'Klicke Kanten an, um sie als '+ET()[S.activeTool].label+' zu markieren.' : 'Wähle oben einen Kanten-Typ, dann klicke Kanten auf dem Plan an.')));
 }
 
 /* ---- building pills ---- */
-function buildPills(){const box=$('#pills');box.innerHTML='';const S=St();const all=el('div','pill'+(S.activeBuilding==='ALL'?' on':''),'Alle');all.onclick=()=>{S.activeBuilding='ALL';renderAll();};box.appendChild(all);S.buildings.forEach(b=>{const p=el('div','pill'+(S.activeBuilding===b.name?' on':''),b.name);p.onclick=()=>{S.activeBuilding=b.name;renderAll();};box.appendChild(p);});}
+function buildPills(){const box=$('#pills');box.innerHTML='';const S=St();const all=el('div','pill'+(S.activeBuilding==='ALL'?' on':''),'Alle');all.onclick=()=>{S.activeBuilding='ALL';VIEW.zoom=1;VIEW.panx=0;VIEW.pany=0;renderAll();};box.appendChild(all);S.buildings.forEach(b=>{const label=b.projectName?(b.name+' · Dach '+(Number(b.projectId)+1)):b.name;const p=el('div','pill'+(S.activeBuilding===b.name?' on':''),label);if(b.projectName)p.title=b.projectName;p.onclick=()=>{S.activeBuilding=b.name;VIEW.zoom=1;VIEW.panx=0;VIEW.pany=0;renderAll();};box.appendChild(p);});}
 
 /* ---- canvas ---- */
 function computeView(){
-  const S=St(),cv=$('#plan'),host=cv.parentElement;const cw=Math.max(280,Math.floor((host&&host.clientWidth)||cv.clientWidth||900)),ch=560;VIEW.W=cw;VIEW.H=ch;
+  const S=St(),cv=$('#plan'),host=cv.parentElement,panel=$('#editorpanel');
+  const cw=Math.max(280,Math.floor((host&&host.clientWidth)||cv.clientWidth||900));
+  const expanded=panel&&panel.classList.contains('expanded');
+  const ch=expanded?Math.max(320,Math.floor(host.clientHeight||window.innerHeight-220)):Math.max(560,Math.min(760,Math.floor(window.innerHeight*.68)));
+  VIEW.W=cw;VIEW.H=ch;
   const mods=S.activeBuilding==='ALL'?S.mods:S.buildings.find(b=>b.name===S.activeBuilding).mods;
-  const allV=[...mods.map(m=>m.v),...S.carriers,...S.env];
+  const allV=[...mods.map(m=>m.v),...S.carriers.filter(visiblePoly),...S.env.filter(visiblePoly)];
   let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;allV.forEach(v=>v.forEach(([x,y])=>{minx=Math.min(minx,x);miny=Math.min(miny,y);maxx=Math.max(maxx,x);maxy=Math.max(maxy,y);}));
   const pad=VIEW.pad,s=Math.min((cw-2*pad)/(maxx-minx||1),(ch-2*pad)/(maxy-miny||1));
   VIEW.x0=minx;VIEW.y0=miny;VIEW.baseScale=s;VIEW.scale=s*(VIEW.zoom||1);VIEW.maxy=maxy;
@@ -1287,20 +1338,21 @@ function drawPlan(){
   const mods=S.activeBuilding==='ALL'?S.mods:S.buildings.find(b=>b.name===S.activeBuilding).mods;
   const poly=(v,st,fl,w,dash)=>{ctx.beginPath();v.forEach((p,i)=>{const[X,Y]=W2S(p[0],p[1]);i?ctx.lineTo(X,Y):ctx.moveTo(X,Y);});if(fl){ctx.fillStyle=fl;ctx.fill();}if(st){ctx.setLineDash(dash||[]);ctx.strokeStyle=st;ctx.lineWidth=w||1;ctx.stroke();ctx.setLineDash([]);}};
   // roof planes (carriers) — outline + faint fill = Dachumriss
-  S.carriers.forEach(v=>poly(v,'#c9a26b','rgba(214,170,110,.10)',1));
+  const visibleCarriers=S.carriers.filter(visiblePoly);
+  visibleCarriers.forEach(v=>poly(v,'#c9a26b','rgba(214,170,110,.10)',1));
   // auto-detected ridge (First) lines from SPT roof faces — red dashed
-  (S.roofs||[]).forEach(r=>{ if(r.ridge) poly([r.ridge[0],r.ridge[1]],'#c0392b',null,2,[7,4]); });
+  (S.roofs||[]).filter(r=>visiblePoly(r.verts)).forEach(r=>{ if(r.ridge) poly([r.ridge[0],r.ridge[1]],'#c0392b',null,2,[7,4]); });
   // env outline
-  S.env.forEach(v=>poly(v,'#999',null,1,[4,3]));
+  S.env.filter(visiblePoly).forEach(v=>poly(v,'#999',null,1,[4,3]));
   // barred
-  S.barred.forEach(v=>poly(v,'#bbb','rgba(180,180,180,.30)',1));
+  S.barred.filter(visiblePoly).forEach(v=>poly(v,'#bbb','rgba(180,180,180,.30)',1));
   // computed/SPT Aura plates, colored by width (opaque so they don't bleed through modules).
   // Im Editor-Modus live aus S.auraUser zeichnen (während des Ziehens, vor compute()).
   const auraEdit = S.activeTool==='__aura' && S.auraUser;
   if(S.showAura!==false){
     const ac={2770:'#7aa85a',1940:'#a7c97a',1380:'#c4dca8',cut:'#e0a046'};
     if(auraEdit){
-      Object.keys(S.auraUser).forEach(bn=>{
+      Object.keys(S.auraUser).filter(visibleBuilding).forEach(bn=>{
         const u=S.auraUser[bn];
         u.plates.forEach(p=>{
           const v=[[p.x,p.y],[p.x+p.w,p.y],[p.x+p.w,p.y+p.h],[p.x,p.y+p.h]].map(([fx,fy])=>auraF2W(u,fx,fy));
@@ -1308,7 +1360,7 @@ function drawPlan(){
         });
       });
     } else if(S.auraRects){
-      S.auraRects.forEach(r=>poly(r.verts, 'rgba(90,110,70,.6)', ac[r.kind]||'#b4b4b4', 0.4));
+      S.auraRects.filter(r=>visiblePoly(r.verts)).forEach(r=>poly(r.verts, 'rgba(90,110,70,.6)', ac[r.kind]||'#b4b4b4', 0.4));
     }
   }
   // modules (opaque, drawn on top of aura)
@@ -1320,20 +1372,20 @@ function drawPlan(){
   // DXF-Layer-Vorbelegung (PV*Sol): First/Ort/Grat/Kehle/Schneefang aus der Datei
   if(S.preset && S.preset.length){
     ctx.globalAlpha=.55;
-    S.preset.forEach(p=>{ if(!over.has(p.type)) poly([p.a,p.b],ET()[p.type].col,null,3,[8,5]); });
+    S.preset.forEach(p=>{ if(visiblePoly([p.a,p.b])&&!over.has(p.type)) poly([p.a,p.b],ET()[p.type].col,null,3,[8,5]); });
     ctx.globalAlpha=1;
   }
   // SPT snow-guard line (Schneefang) — runs along the eave edges of the snow-guard plates
   if(S.showSnow!==false && !over.has('Schneefang') && S.sptSnow && S.sptSnow.length){
     ctx.globalAlpha=.55; ctx.strokeStyle='#7a4fc0'; ctx.lineWidth=4; ctx.lineCap='round'; ctx.setLineDash([8,5]);
-    S.sptSnow.forEach(seg=>{ if(!seg||seg.length<2)return;
+    S.sptSnow.forEach(seg=>{ if(!seg||seg.length<2||!visiblePoly(seg))return;
       const[X0,Y0]=W2S(seg[0][0],seg[0][1]); const[X1,Y1]=W2S(seg[1][0],seg[1][1]);
       ctx.beginPath();ctx.moveTo(X0,Y0);ctx.lineTo(X1,Y1);ctx.stroke();
     });
     ctx.setLineDash([]); ctx.lineCap='butt'; ctx.globalAlpha=1;
   }
   // candidate edges (clickable) — interior dashed grey, boundary thin grey
-  S.edgeCands.forEach(e=>{
+  S.edgeCands.filter(e=>visibleBuilding(A().nearestBuilding(e.m))).forEach(e=>{
     const t=S.assign[e.id];
     const c=t?ET()[t].col:(e.interior?'#aab':'#cbd');
     const w=t?3.5:(e.interior?2:1.4);
@@ -1350,7 +1402,7 @@ function drawPlan(){
     if(!t){const[mx,my]=W2S(e.m[0],e.m[1]);ctx.beginPath();ctx.arc(mx,my,2.5,0,7);ctx.fillStyle='#99a';ctx.fill();}
   });
   // free-drawn edges
-  S.drawnEdges.forEach(e=>poly([e.a,e.b],ET()[e.type].col,null,3.5));
+  S.drawnEdges.filter(e=>visiblePoly([e.a,e.b])).forEach(e=>poly([e.a,e.b],ET()[e.type].col,null,3.5));
   // draw-in-progress
   if(drawStart){const[X,Y]=W2S(drawStart[0],drawStart[1]);ctx.beginPath();ctx.arc(X,Y,4,0,7);ctx.fillStyle=ET()[S.drawType||'First'].col;ctx.fill();}
   // numbered face badges ON TOP (match the "Dachneigung je Fläche" panel) so faces↔pitch are mappable
@@ -1376,7 +1428,7 @@ function drawPlan(){
   // Aura-Editor: Breitenlabels auf allen Platten, Auswahl mit Rahmen + Griffen + Massen
   if(auraEdit){
     ctx.textAlign='center';ctx.textBaseline='middle';
-    Object.keys(S.auraUser).forEach(bn=>{
+    Object.keys(S.auraUser).filter(visibleBuilding).forEach(bn=>{
       const u=S.auraUser[bn];
       u.plates.forEach((p,i)=>{
         const c=auraF2W(u,p.x+p.w/2,p.y+p.h/2);const[X,Y]=W2S(c[0],c[1]);
@@ -1400,14 +1452,14 @@ function drawPlan(){
     });
     ctx.textAlign='start';ctx.textBaseline='alphabetic';
   }
-  $('#planmeta').textContent=`${mods.length} Module · ${S.carriers.length} Dachflächen`;
+  $('#planmeta').textContent=`${mods.length} Module · ${visibleCarriers.length} Dachflächen`;
 }
 
 /* ---- canvas interaction ---- */
 function canvasXY(ev){const cv=$('#plan'),r=cv.getBoundingClientRect();return [(ev.clientX-r.left)*VIEW.W/r.width,(ev.clientY-r.top)*VIEW.H/r.height];}
 function nearestCandidate(sx,sy){
   const S=St();let best=null,bd=12; // px threshold
-  S.edgeCands.forEach(e=>{const[ax,ay]=W2S(e.a[0],e.a[1]),[bx,by]=W2S(e.b[0],e.b[1]);const d=ptSeg(sx,sy,ax,ay,bx,by);if(d<bd){bd=d;best=e;}});
+  S.edgeCands.filter(e=>visibleBuilding(A().nearestBuilding(e.m))).forEach(e=>{const[ax,ay]=W2S(e.a[0],e.a[1]),[bx,by]=W2S(e.b[0],e.b[1]);const d=ptSeg(sx,sy,ax,ay,bx,by);if(d<bd){bd=d;best=e;}});
   return best;
 }
 function ptSeg(px,py,ax,ay,bx,by){const dx=bx-ax,dy=by-ay,l2=dx*dx+dy*dy;let t=l2?((px-ax)*dx+(py-ay)*dy)/l2:0;t=Math.max(0,Math.min(1,t));const cx=ax+t*dx,cy=ay+t*dy;return Math.hypot(px-cx,py-cy);}
@@ -1429,12 +1481,46 @@ function auraEnsureUser(){
     else S.auraUser[b.name]={frame:A().buildingFrame(b), plates:[]};
   });
 }
+function auraRectToFrame(p,from,to){
+  const corners=[[p.x,p.y],[p.x+p.w,p.y],[p.x+p.w,p.y+p.h],[p.x,p.y+p.h]]
+    .map(q=>auraF2W({frame:from},q[0],q[1])).map(q=>auraW2F({frame:to},q[0],q[1]));
+  const xs=corners.map(q=>q[0]),ys=corners.map(q=>q[1]);
+  const x=Math.min(...xs),y=Math.min(...ys);
+  return {x,y,w:Math.max(...xs)-x,h:Math.max(...ys)-y};
+}
+function auraOverlap(a,b){
+  const w=Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x);
+  const h=Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y);
+  if(w<=0||h<=0)return false;
+  return w*h>Math.min(a.w*a.h,b.w*b.h)*.55;
+}
+// Add only missing automatic plates; never discard imported or manually edited plates.
+function auraMergeAuto(){
+  const S=St();auraEnsureUser();
+  const user=S.auraUser;
+  S.auraUser=null;A().compute();
+  const auto=S.result&&S.result.aura?S.result.aura:{};
+  S.auraUser=user;
+  let added=0;
+  S.buildings.filter(b=>visibleBuilding(b.name)).forEach(b=>{
+    const src=auto[b.name];if(!src||!src.frame)return;
+    if(!user[b.name])user[b.name]={frame:A().buildingFrame(b),plates:[]};
+    const u=user[b.name];
+    (src.framePlates||[]).forEach(p=>{
+      const q=auraRectToFrame(p,src.frame,u.frame);
+      if(!u.plates.some(x=>auraOverlap(x,q))){u.plates.push(q);added++;}
+    });
+  });
+  S.auraMessage=added?('Auto-Layout: '+added+' fehlende Platten ergänzt.'):'Auto-Layout: keine fehlenden Platten gefunden.';
+  A().compute();renderAll();
+  return added;
+}
 // Platte unter dem Cursor: {b,i,edge:null|'e'|'w'|'n'|'s'} — Kante innerhalb 6 px = Resize
 function auraHit(sx,sy){
   const S=St(); if(!S.auraUser) return null;
   const w=S2W(sx,sy);
   const tol=6/((VIEW.baseScale||1)*(VIEW.zoom||1));
-  for(const bn of Object.keys(S.auraUser)){
+  for(const bn of Object.keys(S.auraUser).filter(visibleBuilding)){
     const u=S.auraUser[bn];
     const f=auraW2F(u,w[0],w[1]);
     for(let i=u.plates.length-1;i>=0;i--){
@@ -1463,11 +1549,12 @@ function auraSnapCands(bn){
     xs.push(x0,x1);ys.push(y0,y1);
   };
   (b?b.mods:[]).forEach(m=>addBox(m.v));
-  (S.barred||[]).forEach(v=>addBox(v)); // Störflächen: Platten docken auch hier an
+  (S.barred||[]).filter(v=>A().nearestBuilding(A().centroid(v))===bn).forEach(v=>addBox(v)); // only this roof
   u.plates.forEach((p,i)=>{ if(S.auraSel&&S.auraSel.b===bn&&S.auraSel.i===i)return; xs.push(p.x,p.x+p.w);ys.push(p.y,p.y+p.h); });
   return {xs,ys};
 }
 function snapTo(v,cands,tol){let best=v,bd=tol;for(const c of cands){const d=Math.abs(c-v);if(d<bd){bd=d;best=c;}}return best;}
+function snapDelta(edges,cands,tol){let delta=0,bd=tol;for(const e of edges)for(const c of cands){const d=c-e;if(Math.abs(d)<bd){bd=Math.abs(d);delta=d;}}return delta;}
 
 function setupCanvas(){
   const cv=$('#plan');
@@ -1496,10 +1583,10 @@ function setupCanvas(){
       if(h){
         S.auraSel={b:h.b,i:h.i};
         auraDrag={b:h.b,i:h.i,edge:h.edge,f0:h.f,orig:Object.assign({},S.auraUser[h.b].plates[h.i]),cands:auraSnapCands(h.b)};
-        drawPlan();
+        buildPalette();drawPlan();
         return;
       }
-      if(S.auraSel){S.auraSel=null;drawPlan();}
+      if(S.auraSel){S.auraSel=null;buildPalette();drawPlan();}
     }
     dragging=true;dragMoved=false;lastX=x;lastY=y;
   });
@@ -1514,28 +1601,26 @@ function setupCanvas(){
       const wpt=S2W(sx,sy);
       const f=auraW2F(u,wpt[0],wpt[1]);
       const dx=f[0]-auraDrag.f0[0], dy=f[1]-auraDrag.f0[1];
-      const p=u.plates[auraDrag.i], o=auraDrag.orig, C=auraDrag.cands, T=0.05;
-      const r2=v=>Math.round(v*100)/100;
-      if(!auraDrag.edge){ // verschieben, Kanten snappen
-        let nx=r2(o.x+dx), ny=r2(o.y+dy);
-        const sl=snapTo(nx,C.xs,T), sr=snapTo(nx+o.w,C.xs,T);
-        if(sl!==nx) nx=sl; else if(sr!==nx+o.w) nx=r2(sr-o.w);
-        const sb=snapTo(ny,C.ys,T), st=snapTo(ny+o.h,C.ys,T);
-        if(sb!==ny) ny=sb; else if(st!==ny+o.h) ny=r2(st-o.h);
+      const p=u.plates[auraDrag.i],o=auraDrag.orig,C=auraDrag.cands;
+      const scale=(VIEW.baseScale||1)*(VIEW.zoom||1),T=Math.min(.04,8/scale);
+      const doSnap=S.auraSnap!==false&&!ev.altKey;
+      const r3=v=>Math.round(v*1000)/1000;
+      if(!auraDrag.edge){
+        let nx=r3(o.x+dx),ny=r3(o.y+dy);
+        if(doSnap){nx=r3(nx+snapDelta([nx,nx+o.w],C.xs,T));ny=r3(ny+snapDelta([ny,ny+o.h],C.ys,T));}
         p.x=nx;p.y=ny;
-      } else if(auraDrag.edge==='e'){ // Breite über rechte Kante, rastet auf Standardbreiten
-        const re=snapTo(r2(o.x+o.w+dx),C.xs,T);
-        p.w=r2(snapTo(Math.max(0.2,re-o.x),AURA_STD,0.04));
-      } else if(auraDrag.edge==='w'){ // Breite über linke Kante (rechte bleibt fix)
-        const le=snapTo(r2(o.x+dx),C.xs,T);
-        const wN=r2(snapTo(Math.max(0.2,o.x+o.w-le),AURA_STD,0.04));
-        p.x=r2(o.x+o.w-wN);p.w=wN;
-      } else if(auraDrag.edge==='n'){ // Höhe über obere Kante
-        const te=snapTo(r2(o.y+o.h+dy),C.ys,T);
-        p.h=r2(Math.max(0.2,te-o.y));
-      } else if(auraDrag.edge==='s'){ // Höhe über untere Kante (obere bleibt fix)
-        const be=snapTo(r2(o.y+dy),C.ys,T);
-        p.y=r2(Math.min(be,o.y+o.h-0.2));p.h=r2(o.y+o.h-p.y);
+      } else if(auraDrag.edge==='e'){
+        const raw=Math.max(.2,o.w+dx),cands=AURA_STD.concat(C.xs.map(x=>x-o.x).filter(x=>x>=.2));
+        p.w=r3(doSnap?snapTo(raw,cands,T):raw);
+      } else if(auraDrag.edge==='w'){
+        const right=o.x+o.w,raw=Math.max(.2,o.w-dx),cands=AURA_STD.concat(C.xs.map(x=>right-x).filter(x=>x>=.2));
+        const wN=r3(doSnap?snapTo(raw,cands,T):raw);p.x=r3(right-wN);p.w=wN;
+      } else if(auraDrag.edge==='n'){
+        const raw=Math.max(.2,o.h+dy),cands=[.43,.87].concat(C.ys.map(y=>y-o.y).filter(y=>y>=.2));
+        p.h=r3(doSnap?snapTo(raw,cands,T):raw);
+      } else if(auraDrag.edge==='s'){
+        const top=o.y+o.h,raw=Math.max(.2,o.h-dy),cands=[.43,.87].concat(C.ys.map(y=>top-y).filter(y=>y>=.2));
+        const hN=r3(doSnap?snapTo(raw,cands,T):raw);p.y=r3(top-hN);p.h=hN;
       }
       drawPlan();
       return;
@@ -1585,6 +1670,7 @@ function setupCanvas(){
   // Entf/Backspace löscht die ausgewählte Aura-Platte
   window.addEventListener('keydown',ev=>{
     const S=St();
+    if(ev.key==='Escape'&&$('#editorpanel').classList.contains('expanded')){setEditorExpanded(false);buildPalette();return;}
     if(S.activeTool!=='__aura'||!S.auraSel)return;
     if(ev.key!=='Delete'&&ev.key!=='Backspace')return;
     if(/INPUT|SELECT|TEXTAREA/.test((ev.target&&ev.target.tagName)||''))return;

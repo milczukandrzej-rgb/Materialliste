@@ -58,11 +58,12 @@ einen lokalen Webserver geöffnet werden (Browser-Sicherheit verbietet WASM-Lade
   Platten (≤ 440 mm) zu zweit übereinander aus einem Rohling. Aufsteckprofil
   und Plattenauflager zählen trotzdem **je verbautem Teilstück**. Die Zeile
   „davon aus Abschnitten gedeckt" zeigt die eingesparten Rohlinge.
-- **„⬚ Aura bearbeiten":** Platten verschieben (ziehen), Breite/Höhe an den
-  Kanten ziehen (rastet auf Standardbreiten, Modul- und Störflächenkanten).
-  Klick auf leere Fläche setzt den **Einfügepunkt (×)** — „+ Platte" erzeugt
-  die Platte dort (CAD-Prinzip). „– Platte löschen" (oder Entf),
-  „↺ Auto-Layout" stellt die Automatik wieder her.
+- **„⬚ Aura bearbeiten":** Platten verschieben oder an den Kanten skalieren.
+  „⛶ Vollbild" vergrößert den Arbeitsbereich. Snap lässt sich dauerhaft über
+  „◉ Snap" oder während des Ziehens vorübergehend mit Alt ausschalten.
+  Für die ausgewählte Platte können Breite und Höhe zusätzlich millimetergenau
+  eingegeben werden. „＋ Auto ergänzen" fügt nur fehlende automatische Platten
+  hinzu und behält das importierte bzw. manuell bearbeitete Layout.
 - **Layer „Aura" in der Datei:** Rechtecke auf einem Layer namens Aura
   (DXF oder DWG) werden 1:1 als Platten-Layout übernommen und sind im Editor
   weiter bearbeitbar. Der Name wird ohne Beachtung der Groß-/Kleinschreibung
