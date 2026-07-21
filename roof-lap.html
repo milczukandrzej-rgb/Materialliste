@@ -265,6 +265,15 @@ function parseDXF(text){
   for(let i=0;i<lines.length-1;i+=2){
     toks.push([parseInt(lines[i].trim(),10), lines[i+1]]);
   }
+  // Keep the drawing unit from the HEADER. It is only used as a fallback when
+  // no module geometry is available to infer the scale more reliably.
+  let insUnits=null;
+  for(let k=0;k<toks.length;k++){
+    if(toks[k][0]===9&&String(toks[k][1]).trim()==='$INSUNITS'){
+      for(let j=k+1;j<Math.min(k+5,toks.length);j++)if(toks[j][0]===70){insUnits=parseInt(toks[j][1],10);break;}
+      break;
+    }
+  }
   // split sections
   let i=0;
   const blocks={};         // name -> array of entities (in block coords)
@@ -385,6 +394,7 @@ function parseDXF(text){
       pushResolved(e);
     }
   }
+  resolved.insUnits=Number.isFinite(insUnits)?insUnits:null;
   return resolved;
 }
 window.__parseDXF=parseDXF;
@@ -436,16 +446,23 @@ function polyArea(v){let s=0;for(let i=0;i<v.length;i++){const[x1,y1]=v[i],[x2,y
 function pointInPoly(pt,poly){let c=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const xi=poly[i][0],yi=poly[i][1],xj=poly[j][0],yj=poly[j][1];if(((yi>pt[1])!==(yj>pt[1]))&&(pt[0]<(xj-xi)*(pt[1]-yi)/(yj-yi)+xi))c=!c;}return c;}
 function polyLen(v){let s=0;for(let i=0;i<v.length-1;i++)s+=H(v[i],v[i+1]);return s;}
 
-/* DXF $INSUNITS is frequently missing or wrong. Infer scale from module geometry. */
-function normalizeScale(resolved){
-  const lens=(resolved||[]).filter(e=>e.layer==='MODULES'&&e.verts&&e.verts.length>=4)
+/* DXF $INSUNITS is frequently missing or wrong. Prefer module/Aura geometry;
+   use the HEADER unit only when neither provides a known physical size. */
+function normalizeScale(resolved,insUnits=null){
+  const moduleLens=(resolved||[]).filter(e=>canonicalLayer(e.layer)==='MODULES'&&e.verts&&e.verts.length>=4)
     .map(e=>longEdge(e.verts).len).filter(Number.isFinite).sort((a,b)=>a-b);
-  if(!lens.length)return {resolved:resolved||[],factor:1,median:null};
-  const median=lens[Math.floor(lens.length/2)],expected=[1.01,1.38,1.94],factors=[1,100,1000];
-  let factor=1,best=Infinity;
-  factors.forEach(f=>expected.forEach(m=>{const rel=Math.abs(median/f-m)/m;if(rel<best){best=rel;factor=f;}}));
-  if(best>0.30)factor=1;
-  if(factor===1)return {resolved,factor,median};
+  const auraLens=moduleLens.length?[]:(resolved||[]).filter(e=>canonicalLayer(e.layer)==='AURA'&&e.verts&&e.verts.length>=4)
+    .map(e=>longEdge(e.verts).len).filter(Number.isFinite).sort((a,b)=>a-b);
+  const lens=moduleLens.length?moduleLens:auraLens;
+  // AutoCAD unit codes: 4=millimetres, 5=centimetres, 6=metres.
+  const unitFactor=({4:1000,5:100,6:1})[insUnits]||1;
+  let factor=1,median=null;
+  if(lens.length){
+    median=lens[Math.floor(lens.length/2)];const expected=moduleLens.length?[1.01,1.38,1.94]:[1.38,1.94,2.77],factors=[1,100,1000];let best=Infinity;
+    factors.forEach(f=>expected.forEach(m=>{const rel=Math.abs(median/f-m)/m;if(rel<best){best=rel;factor=f;}}));
+    if(best>0.30)factor=unitFactor;
+  } else factor=unitFactor;
+  if(factor===1)return {resolved:resolved||[],factor,median};
   return {resolved:(resolved||[]).map(e=>({...e,verts:e.verts?e.verts.map(([x,y])=>[x/factor,y/factor]):e.verts})),factor,median};
 }
 
@@ -466,6 +483,7 @@ function clusterBuildings(mods){
     all.forEach((b,i)=>{b.name='H'+(i+1);});
     return all;
   }
+  if(!mods.length)return [];
   const cents=mods.map(m=>centroid(m.v));
   let minx=1e9,miny=1e9;cents.forEach(([x,y])=>{minx=Math.min(minx,x);miny=Math.min(miny,y);});
   const cell=0.5,dil=6;
@@ -478,7 +496,7 @@ function clusterBuildings(mods){
   const groups={};for(let k=0;k<cents.length;k++){const L=lab[idx(gx[k]+dil,gy[k]+dil)];(groups[L]=groups[L]||[]).push(k);}
   let blds=Object.values(groups).map(ids=>{const cs=ids.map(i=>cents[i]);const cx=cs.reduce((a,c)=>a+c[0],0)/cs.length,cy=cs.reduce((a,c)=>a+c[1],0)/cs.length;return {modIdx:ids,cx,cy};});
   blds.sort((a,b)=>(b.cy-a.cy)||(a.cx-b.cx));
-  blds.forEach((b,i)=>{b.name='H'+(i+1);b.mods=b.modIdx.map(i=>mods[i]);});
+  blds.forEach((b,i)=>{b.name='H'+(i+1);b.mods=b.modIdx.map(i=>mods[i]);b.projectId=mods[0].projectId;b.projectName=mods[0].projectName;});
   return blds;
 }
 
@@ -671,7 +689,12 @@ function auraForBuilding(b){
 
 /* ---- Aura: Nutzer-Layout (Editor / „Aura"-Layer-Import) ---- */
 function buildingFrame(b){
-  const angs=b.mods.map(m=>((longEdge(m.v).ang%Math.PI)+Math.PI)%Math.PI);angs.sort((x,y)=>x-y);
+  let source=b.mods.map(m=>m.v);
+  if(!source.length){
+    source=(S.layers['AURA']||[]).map(e=>e.verts).filter(v=>nearestBuilding(centroid(v))===b.name);
+    if(!source.length)source=S.carriers.filter(v=>nearestBuilding(centroid(v))===b.name);
+  }
+  const angs=source.map(v=>((longEdge(v).ang%Math.PI)+Math.PI)%Math.PI);angs.sort((x,y)=>x-y);
   const dom=angs.length?angs[Math.floor(angs.length/2)]:0;
   return {cc:Math.cos(-dom), ss:Math.sin(-dom)};
 }
@@ -1008,10 +1031,9 @@ function closedLayerPolys(entities){
 
 /* ---- parse entry ---- */
 function onParsed(resolved){
-  resolved=normalizeScale(resolved).resolved.map(e=>({...e,layer:canonicalLayer(e.layer)}));
+  resolved=normalizeScale(resolved,resolved&&resolved.insUnits).resolved.map(e=>({...e,layer:canonicalLayer(e.layer)}));
   S.raw=resolved;const byL={};resolved.forEach(e=>{(byL[e.layer]=byL[e.layer]||[]).push(e);});S.layers=byL;
   const modP=(byL['MODULES']||[]).filter(e=>e.verts.length>=4);
-  if(!modP.length)return {ok:false,msg:'Kein Layer „MODULES" gefunden.'};
   S.mods=modP.map(e=>({v:e.verts,type:e.modType||classifyModule(e.verts),projectId:e.projectId,projectName:e.projectName}));
   S.carriers=(byL['MODULECARRIERS']||[]).filter(e=>e.verts.length>=3).map(e=>e.verts);
   S.barred=(byL['BARREDAREAS']||[]).filter(e=>e.verts.length>=4).map(e=>e.verts);
@@ -1040,6 +1062,24 @@ function onParsed(resolved){
   // SPT snowguard markers -> preset Schneefang points
   S.sptSnow = (byL['__SNOWGUARD__']||[]).map(e=>e.verts);
   S.buildings=clusterBuildings(S.mods);
+  // A roof may legitimately contain only Aura plates. Add one building per
+  // moduleless imported file, anchored by its roof outline (or Aura geometry).
+  const pkey=v=>v==null?'legacy':String(v);
+  const covered=new Set(S.mods.map(m=>pkey(m.projectId)));
+  const projectGroups={};
+  resolved.forEach(e=>{const k=pkey(e.projectId);(projectGroups[k]=projectGroups[k]||[]).push(e);});
+  Object.entries(projectGroups).forEach(([key,ents])=>{
+    if(covered.has(key))return;
+    let geom=ents.filter(e=>['MODULAREA','MODULECARRIERS'].includes(e.layer)&&e.verts.length>=3);
+    if(!geom.length)geom=ents.filter(e=>e.layer==='AURA'&&e.verts.length>=3);
+    if(!geom.length)return;
+    const ref=geom.slice().sort((a,b)=>polyArea(b.verts)-polyArea(a.verts))[0];
+    const [cx,cy]=centroid(ref.verts),sample=ents[0];
+    S.buildings.push({name:'',mods:[],modIdx:[],cx,cy,projectId:sample.projectId,projectName:sample.projectName,moduleless:true});
+  });
+  if(!S.buildings.length)return {ok:false,msg:'Keine Module, Dachkontur oder Aura-Fläche gefunden.'};
+  if(S.buildings.every(b=>b.projectId!=null))S.buildings.sort((a,b)=>Number(a.projectId)-Number(b.projectId));
+  S.buildings.forEach((b,i)=>{b.name='H'+(i+1);});
   S.assign={};S.assignSnow={};S.drawnEdges=[];
   // Layer „Aura" (DXF/DWG): geschlossene Polylinien = vom Anwender gezeichnetes
   // Platten-Layout -> als Nutzer-Layout übernehmen (hat Vorrang vor der Automatik)
@@ -1078,7 +1118,7 @@ function parseProjects(projects){
   const comb=[],aura=[],roofs=[];
   let cursor=null;
   projects.forEach((pr,projectId)=>{
-    const norm=normalizeScale(pr.resolved),resolved=norm.resolved,f=norm.factor;
+    const norm=normalizeScale(pr.resolved,pr.insUnits??pr.resolved.insUnits),resolved=norm.resolved,f=norm.factor;
     let x0=1e9,x1=-1e9;
     const eat=v=>v.forEach(([x])=>{x0=Math.min(x0,x);x1=Math.max(x1,x);});
     resolved.forEach(e=>eat(e.verts));
@@ -1154,7 +1194,7 @@ function loadFile(f){
 }
 function finishParse(resolved,f,info,merge){
   const S0=St();
-  const proj={name:f.name,resolved,sptAura:(window.__SPT_AURA||[]).slice(),sptRoofs:(window.__SPT_ROOFS||[]).slice()};
+  const proj={name:f.name,resolved,insUnits:resolved.insUnits,sptAura:(window.__SPT_AURA||[]).slice(),sptRoofs:(window.__SPT_ROOFS||[]).slice()};
   if(merge && S0.projects && S0.projects.length) S0.projects.push(proj); else S0.projects=[proj];
   const res=A().parseProjects(S0.projects);
   if(!res.ok){info.className='note warn';info.innerHTML='<b>Datei nicht lesbar.</b> '+res.msg;if(merge)S0.projects.pop();return;}
@@ -1308,7 +1348,7 @@ function buildPalette(){
 }
 
 /* ---- building pills ---- */
-function buildPills(){const box=$('#pills');box.innerHTML='';const S=St();const all=el('div','pill'+(S.activeBuilding==='ALL'?' on':''),'Alle');all.onclick=()=>{S.activeBuilding='ALL';VIEW.zoom=1;VIEW.panx=0;VIEW.pany=0;renderAll();};box.appendChild(all);S.buildings.forEach(b=>{const label=b.projectName?(b.name+' · Dach '+(Number(b.projectId)+1)):b.name;const p=el('div','pill'+(S.activeBuilding===b.name?' on':''),label);if(b.projectName)p.title=b.projectName;p.onclick=()=>{S.activeBuilding=b.name;VIEW.zoom=1;VIEW.panx=0;VIEW.pany=0;renderAll();};box.appendChild(p);});}
+function buildPills(){const box=$('#pills');box.innerHTML='';const S=St();const all=el('div','pill'+(S.activeBuilding==='ALL'?' on':''),'Alle');all.onclick=()=>{S.activeBuilding='ALL';VIEW.zoom=1;VIEW.panx=0;VIEW.pany=0;renderAll();};box.appendChild(all);const multi=S.projects&&S.projects.length>1;S.buildings.forEach(b=>{const label=multi&&b.projectName?(b.name+' · Dach '+(Number(b.projectId)+1)):b.name;const p=el('div','pill'+(S.activeBuilding===b.name?' on':''),label);if(b.projectName)p.title=b.projectName;p.onclick=()=>{S.activeBuilding=b.name;VIEW.zoom=1;VIEW.panx=0;VIEW.pany=0;renderAll();};box.appendChild(p);});}
 
 /* ---- canvas ---- */
 function computeView(){
