@@ -581,7 +581,9 @@ function auraForBuilding(b){
   const carrR=carr.map(rotPoly), modR=mods.map(rotPoly), barR=barred.map(rotPoly);
   // bbox in rotated frame
   let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;carrR.forEach(v=>v.forEach(([x,y])=>{x0=Math.min(x0,x);y0=Math.min(y0,y);x1=Math.max(x1,x);y1=Math.max(y1,y);}));
-  const ROW=0.78, PH=0.87, MINW=0.40, GAP=0.01;
+  
+  // ZMIANA: Wysokość aury na 780 mm (0.78 metra)
+  const ROW=0.78, PH=0.78, MINW=0.40, GAP=0.01;
   const WIDTHS=[2.77,1.94,1.38];
   // (a) accurate remaining area via raster (modules + barred subtracted)
   let rx0=1e9,ry0=1e9,rx1=-1e9,ry1=-1e9;carrR.forEach(v=>v.forEach(([x,y])=>{rx0=Math.min(rx0,x);ry0=Math.min(ry0,y);rx1=Math.max(rx1,x);ry1=Math.max(ry1,y);}));
@@ -1162,7 +1164,7 @@ $$('.step').forEach(s=>{s.style.cursor='pointer';s.addEventListener('click',()=>
 const drop=$('#drop'),file=$('#file');
 drop.addEventListener('click',()=>file.click());
 drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('over');});
-drop.addEventListener('dragleave',()=>drop.classList.remove('over'));
+drop.addEventListener('dragleave',()=>drop.classList.remove('over');});
 drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('over');if(e.dataTransfer.files[0])loadFile(e.dataTransfer.files[0]);});
 file.addEventListener('change',e=>{if(e.target.files[0]){loadFile(e.target.files[0]);e.target.value='';}});
 // „+ Dach hinzufügen": nächste Datei wird zum Projekt DAZUgeladen statt es zu ersetzen
@@ -1275,10 +1277,25 @@ function buildPalette(){
   const draw=el('button','edgebtn'+(S.activeTool==='__draw'?' on':''),'✎ Freihand');
   draw.onclick=()=>{const leavingAura=S.activeTool==='__aura';S.activeTool=(S.activeTool==='__draw'?null:'__draw');drawStart=null;if(leavingAura)setEditorExpanded(false);buildPalette();drawPlan();};
   box.appendChild(draw);
+  
+  const aurZ = el('button', 'edgebtn' + (S.activeTool === '__aurazone' ? ' on' : ''), '▧ Aura-Feld zeichnen');
+  aurZ.style.setProperty('--c', '#d98a1f');
+  aurZ.onclick = () => {
+    const leaving = S.activeTool === '__aurazone';
+    S.activeTool = (leaving ? null : '__aurazone');
+    S.auraSel = null;
+    drawStart = null;
+    if (leaving) setEditorExpanded(false);
+    buildPalette();
+    drawPlan();
+  };
+  box.appendChild(aurZ);
+
   const aur=el('button','edgebtn'+(S.activeTool==='__aura'?' on':''),'⬚ Aura bearbeiten');
   aur.style.setProperty('--c','#5a7d3c');
   aur.onclick=()=>{const leaving=S.activeTool==='__aura';S.activeTool=(leaving?null:'__aura');S.auraSel=null;drawStart=null;if(leaving)setEditorExpanded(false);buildPalette();drawPlan();};
   box.appendChild(aur);
+
   const clr=el('button','edgebtn ghost','✕ Auswahl löschen');
   clr.onclick=()=>{S.assign={};S.assignSnow={};S.drawnEdges=[];S.activeTool=null;drawStart=null;setEditorExpanded(false);buildPalette();A().compute();renderAll();};
   box.appendChild(clr);
@@ -1443,8 +1460,15 @@ function drawPlan(){
   });
   // free-drawn edges
   S.drawnEdges.filter(e=>visiblePoly([e.a,e.b])).forEach(e=>poly([e.a,e.b],ET()[e.type].col,null,3.5));
+  
   // draw-in-progress
-  if(drawStart){const[X,Y]=W2S(drawStart[0],drawStart[1]);ctx.beginPath();ctx.arc(X,Y,4,0,7);ctx.fillStyle=ET()[S.drawType||'First'].col;ctx.fill();}
+  if(drawStart){
+    const[X,Y]=W2S(drawStart[0],drawStart[1]);
+    ctx.beginPath();ctx.arc(X,Y,4,0,7);
+    ctx.fillStyle = S.activeTool==='__aurazone' ? '#d98a1f' : ET()[S.drawType||'First'].col;
+    ctx.fill();
+  }
+
   // numbered face badges ON TOP (match the "Dachneigung je Fläche" panel) so faces↔pitch are mappable
   if(S.roofs && S.roofs.length && S.activeBuilding==='ALL'){
     S.roofs.forEach((r,i)=>{
@@ -1614,6 +1638,7 @@ function setupCanvas(){
     VIEW.panx += px-a[0]; VIEW.pany += py-a[1];
     drawPlan();
   },{passive:false});
+  
   // drag to pan (oder Aura-Platte bearbeiten)
   cv.addEventListener('mousedown',ev=>{
     const S=St();const[x,y]=canvasXY(ev);
@@ -1628,12 +1653,18 @@ function setupCanvas(){
       }
       if(S.auraSel){S.auraSel=null;buildPalette();drawPlan();}
     }
+    
+    // Zablokuj przesuwanie planu, gdy rysujemy strefę lub linię
+    if(S.activeTool==='__aurazone' || S.activeTool==='__draw') return;
+    
     dragging=true;dragMoved=false;lastX=x;lastY=y;
   });
+  
   window.addEventListener('mouseup',()=>{
     dragging=false;
     if(auraDrag){auraDrag=null;A().compute();renderAll();}
   });
+  
   cv.addEventListener('mousemove',ev=>{
     const S=St();const[sx,sy]=canvasXY(ev);
     if(auraDrag){
@@ -1667,7 +1698,7 @@ function setupCanvas(){
     }
     if(dragging){const dx=sx-lastX,dy=sy-lastY;if(Math.abs(dx)+Math.abs(dy)>2)dragMoved=true;VIEW.panx+=dx;VIEW.pany+=dy;lastX=sx;lastY=sy;drawPlan();cv.style.cursor='grabbing';return;}
     if(!S.activeTool){cv.style.cursor='grab';return;}
-    if(S.activeTool==='__draw'){cv.style.cursor='crosshair';return;}
+    if(S.activeTool==='__draw' || S.activeTool==='__aurazone'){cv.style.cursor='crosshair';return;}
     if(S.activeTool==='__aura'){
       const h=auraHit(sx,sy);
       cv.style.cursor=h?((h.edge==='e'||h.edge==='w')?'ew-resize':(h.edge?'ns-resize':'move')):'grab';
@@ -1675,9 +1706,51 @@ function setupCanvas(){
     }
     cv.style.cursor=nearestCandidate(sx,sy)?'pointer':'grab';
   });
+  
   cv.addEventListener('click',ev=>{
     const S=St();if(dragMoved){dragMoved=false;return;} // ignore clicks that were drags
     if(!S.activeTool)return;
+
+    // Logika dla narzędzia "Aura-Feld zeichnen"
+    if(S.activeTool==='__aurazone'){
+      const[sx,sy]=canvasXY(ev);
+      const w=S2W(sx,sy);
+      if(!drawStart){
+        drawStart=w; // Zapisz pierwsze kliknięcie
+        drawPlan();  // Narysuje kropkę startową
+      } else {
+        // Drugie kliknięcie: wypełnij zaznaczony obszar
+        auraEnsureUser();
+        const bn = S.activeBuilding !== 'ALL' ? S.activeBuilding : A().nearestBuilding(w);
+        if(S.auraUser[bn]) {
+          const u = S.auraUser[bn];
+          const f1 = auraW2F(u, drawStart[0], drawStart[1]);
+          const f2 = auraW2F(u, w[0], w[1]);
+          
+          const minX = Math.min(f1[0], f2[0]);
+          const minY = Math.min(f1[1], f2[1]);
+          const maxX = Math.max(f1[0], f2[0]);
+          const maxY = Math.max(f1[1], f2[1]);
+          
+          const pW = 1.38;
+          const pH = 0.78; // Stała wysokość 780mm
+          
+          for(let py = minY; py + pH <= maxY + 0.1; py += pH) {
+            for(let px = minX; px + pW <= maxX + 0.1; px += pW) {
+              const width = (px + pW > maxX) ? (maxX - px) : pW;
+              if(width > 0.2) u.plates.push({x: px, y: py, w: width, h: pH});
+            }
+          }
+        }
+        drawStart = null;
+        S.activeTool = null; // Zakończ narzędzie po wyrysowaniu
+        buildPalette();
+        A().compute();
+        renderAll();
+      }
+      return;
+    }
+
     if(S.activeTool==='__aura'){
       // Klick auf leere Fläche = Einfügepunkt setzen (×), dort erzeugt „+ Platte" die Platte
       const[ax,ay]=canvasXY(ev);
