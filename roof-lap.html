@@ -1169,7 +1169,7 @@ window.addEventListener('drop',     e => e.preventDefault());
 
 drop.addEventListener('click',()=>file.click());
 drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('over');});
-drop.addEventListener('dragleave',()=>drop.classList.remove('over');});
+drop.addEventListener('dragleave',()=>drop.classList.remove('over'));
 drop.addEventListener('drop',e=>{
   e.preventDefault();
   drop.classList.remove('over');
@@ -1320,7 +1320,7 @@ function buildPalette(){
   // Aura-Editor: Zusatzaktionen
   if(S.activeTool==='__aura'){
     const panel=$('#editorpanel');
-    const full=el('button','edgebtn ghost',panel&&panel.classList.contains('expanded')?'Vollbild schließen':'⛶ Vollbild');
+    const full=el('button','edgebtn ghost',panel&&panel.classList.contains('expanded')?'Vollbild schliessen':'⛶ Vollbild');
     full.onclick=()=>{setEditorExpanded(!(panel&&panel.classList.contains('expanded')));buildPalette();};
     box.appendChild(full);
     const snap=el('button','edgebtn'+(S.auraSnap===false?'':' on'),'◉ Snap');
@@ -1369,7 +1369,7 @@ function buildPalette(){
   }
   $('#editorhint').textContent = S.activeTool==='__draw'
     ? 'Freihand: Startpunkt klicken, dann Endpunkt. Wird als '+(ET()[S.drawType]||{label:''}).label+' gezählt.'
-    : (S.activeTool==='__aura' ? 'Platte ziehen = verschieben · Kante ziehen = Größe · Alt hält Snap vorübergehend aus · exakte Maße stehen nach Auswahl oben in mm · „Auto ergänzen" behält das vorhandene Layout'+(S.auraMessage?' · '+S.auraMessage:'')
+    : (S.activeTool==='__aura' ? 'Platte ziehen = verschieben · Kante ziehen = Grösse · Alt hält Snap vorübergehend aus · exakte Masse stehen nach Auswahl oben in mm · „Auto ergänzen" behält das vorhandene Layout'+(S.auraMessage?' · '+S.auraMessage:'')
     : (S.activeTool==='Schneefang' ? 'Klicke Kanten an, um Schneefang zu setzen (zusätzlich zu Traufe möglich). Manuelle Markierung ersetzt die automatische Schneefang-Erkennung.'
     : (S.activeTool ? 'Klicke Kanten an, um sie als '+ET()[S.activeTool].label+' zu markieren.' : 'Wähle oben einen Kanten-Typ, dann klicke Kanten auf dem Plan an.')));
 }
