@@ -55,15 +55,21 @@
   .step.done .n{background:var(--green);color:#fff;border-color:var(--green)}
 
   /* ---- Dropzone ---- */
-  .drop{
-    border:2px dashed var(--blue);border-radius:12px;background:#fff;
-    padding:54px 24px;text-align:center;cursor:pointer;transition:.15s;
-  }
-  .drop:hover,.drop.over{background:var(--blue-soft);border-color:var(--ink)}
-  .drop .big{font-family:var(--mono);font-size:18px;margin-bottom:6px}
-  .drop .hint{color:#6a6a64;font-size:13px}
-  .drop .formats{margin-top:14px;font-family:var(--mono);font-size:11px;color:#9a9a92;letter-spacing:1px}
-
+  const drop=$('#drop'),file=$('#file');
+  // NOWE: Globalne zablokowanie domyślnego otwierania plików w całej przeglądarce
+  window.addEventListener('dragover', e => e.preventDefault());
+  window.addEventListener('drop',     e => e.preventDefault());
+  // Twoja dotychczasowa obsługa strefy zrzutu
+  drop.addEventListener('click',()=>file.click());
+  drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('over');});
+  drop.addEventListener('dragleave',()=>drop.classList.remove('over'));
+  drop.addEventListener('drop',e=>{
+    e.preventDefault();
+  drop.classList.remove('over');
+  if(e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+});
+  file.addEventListener('change',e=>{if(e.target.files[0]){loadFile(e.target.files[0]);e.target.value='';}});  
+  
   /* ---- Layout grid ---- */
   .grid{display:grid;grid-template-columns:340px 1fr;gap:24px;align-items:start}
   .grid>div{min-width:0}
