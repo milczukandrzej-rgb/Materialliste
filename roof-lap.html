@@ -55,21 +55,15 @@
   .step.done .n{background:var(--green);color:#fff;border-color:var(--green)}
 
   /* ---- Dropzone ---- */
-  const drop=$('#drop'),file=$('#file');
-  // NOWE: Globalne zablokowanie domyślnego otwierania plików w całej przeglądarce
-  window.addEventListener('dragover', e => e.preventDefault());
-  window.addEventListener('drop',     e => e.preventDefault());
-  // Twoja dotychczasowa obsługa strefy zrzutu
-  drop.addEventListener('click',()=>file.click());
-  drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('over');});
-  drop.addEventListener('dragleave',()=>drop.classList.remove('over'));
-  drop.addEventListener('drop',e=>{
-    e.preventDefault();
-  drop.classList.remove('over');
-  if(e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
-});
-  file.addEventListener('change',e=>{if(e.target.files[0]){loadFile(e.target.files[0]);e.target.value='';}});  
-  
+  .drop{
+    border:2px dashed var(--blue);border-radius:12px;background:#fff;
+    padding:54px 24px;text-align:center;cursor:pointer;transition:.15s;
+  }
+  .drop:hover,.drop.over{background:var(--blue-soft);border-color:var(--ink)}
+  .drop .big{font-family:var(--mono);font-size:18px;margin-bottom:6px}
+  .drop .hint{color:#6a6a64;font-size:13px}
+  .drop .formats{margin-top:14px;font-family:var(--mono);font-size:11px;color:#9a9a92;letter-spacing:1px}
+
   /* ---- Layout grid ---- */
   .grid{display:grid;grid-template-columns:340px 1fr;gap:24px;align-items:start}
   .grid>div{min-width:0}
@@ -1168,11 +1162,21 @@ $$('.step').forEach(s=>{s.style.cursor='pointer';s.addEventListener('click',()=>
 
 /* ---- dropzone ---- */
 const drop=$('#drop'),file=$('#file');
+
+// Globalne zablokowanie domyślnego otwierania plików w całej przeglądarce
+window.addEventListener('dragover', e => e.preventDefault());
+window.addEventListener('drop',     e => e.preventDefault());
+
 drop.addEventListener('click',()=>file.click());
 drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('over');});
 drop.addEventListener('dragleave',()=>drop.classList.remove('over');});
-drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('over');if(e.dataTransfer.files[0])loadFile(e.dataTransfer.files[0]);});
+drop.addEventListener('drop',e=>{
+  e.preventDefault();
+  drop.classList.remove('over');
+  if(e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+});
 file.addEventListener('change',e=>{if(e.target.files[0]){loadFile(e.target.files[0]);e.target.value='';}});
+
 // „+ Dach hinzufügen": nächste Datei wird zum Projekt DAZUgeladen statt es zu ersetzen
 const addRoof=$('#addroof');
 if(addRoof)addRoof.addEventListener('click',()=>{St().mergeNext=true;file.click();});
@@ -1630,7 +1634,7 @@ function setupCanvas(){
   const cv=$('#plan');
   let dragging=false, dragMoved=false, lastX=0, lastY=0;
   let auraDrag=null; // {b,i,edge,f0,orig,cands} — aktive Platten-Bearbeitung
-  // wheel zoom toward cursor
+  
   cv.addEventListener('wheel',ev=>{
     ev.preventDefault();
     const [px,py]=canvasXY(ev);
@@ -1639,13 +1643,11 @@ function setupCanvas(){
     VIEW.zoom=Math.max(0.3,Math.min(40,(VIEW.zoom||1)*factor));
     drawPlan();
     const after=S2W(px,py);
-    // adjust pan so the world point under cursor stays fixed
     const a=W2S(before[0],before[1]);
     VIEW.panx += px-a[0]; VIEW.pany += py-a[1];
     drawPlan();
   },{passive:false});
   
-  // drag to pan (oder Aura-Platte bearbeiten)
   cv.addEventListener('mousedown',ev=>{
     const S=St();const[x,y]=canvasXY(ev);
     if(S.activeTool==='__aura'){
