@@ -217,7 +217,7 @@
             <span><i style="background:rgba(96,150,70,.7)"></i>Aura 2770</span>
             <span><i style="background:rgba(140,185,95,.7)"></i>1940</span>
             <span><i style="background:rgba(180,210,140,.7)"></i>1380</span>
-            <span><i style="background:rgba(224,160,70,.8)"></i>Randzuschnitt</span>
+            <span><i style="background:rgba(220,50,50,.8)"></i>Zuschnitt &lt;400</span>
             <span><i style="background:var(--red)"></i>First</span>
             <span><i style="background:var(--amber)"></i>Ort</span>
             <span><i style="background:#7a4fc0"></i>Schneefang</span>
@@ -260,13 +260,10 @@
    ============================================================ */
 function parseDXF(text){
   const lines = text.split(/\r\n|\r|\n/);
-  // tokenize into (code,value) pairs
   const toks=[];
   for(let i=0;i<lines.length-1;i+=2){
     toks.push([parseInt(lines[i].trim(),10), lines[i+1]]);
   }
-  // Keep the drawing unit from the HEADER. It is only used as a fallback when
-  // no module geometry is available to infer the scale more reliably.
   let insUnits=null;
   for(let k=0;k<toks.length;k++){
     if(toks[k][0]===9&&String(toks[k][1]).trim()==='$INSUNITS'){
@@ -274,10 +271,9 @@ function parseDXF(text){
       break;
     }
   }
-  // split sections
   let i=0;
-  const blocks={};         // name -> array of entities (in block coords)
-  const entities=[];       // modelspace entities
+  const blocks={};
+  const entities=[];
   function readEntities(stopAt){
     const out=[];
     while(i<toks.length){
@@ -286,11 +282,10 @@ function parseDXF(text){
       if(code===0){
         const type=val; i++;
         const ent={type,layer:'0',verts:[],dxf:{}};
-        // read until next 0
         while(i<toks.length && toks[i][0]!==0){
           const [c,v]=toks[i];
           if(c===8) ent.layer=v;
-          else if(c===2) ent.dxf.name=v;            // block name (INSERT)
+          else if(c===2) ent.dxf.name=v;            
           else if(c===10) ent.dxf.x=parseFloat(v);
           else if(c===20) ent.dxf.y=parseFloat(v);
           else if(c===41) ent.dxf.sx=parseFloat(v);
@@ -312,8 +307,6 @@ function parseDXF(text){
     }
     return out;
   }
-  // AutoCAD may write a closed shape either as LWPOLYLINE or as the older
-  // POLYLINE + VERTEX ... + SEQEND sequence. Convert both to one representation.
   function normalizeEntities(list){
     const out=[];
     for(let n=0;n<list.length;n++){
@@ -334,11 +327,9 @@ function parseDXF(text){
     return out;
   }
   function dist(a,b){return Math.hypot(b[0]-a[0],b[1]-a[1]);}
-  // walk sections
   while(i<toks.length){
     const [code,val]=toks[i];
     if(code===0 && val==='SECTION'){
-      // find section name (code 2)
       let sname='';
       let j=i+1;
       while(j<toks.length && toks[j][0]!==0){ if(toks[j][0]===2) sname=toks[j][1]; j++; }
@@ -350,7 +341,6 @@ function parseDXF(text){
             while(i<toks.length && toks[i][0]!==0){ if(toks[i][0]===2) bname=toks[i][1]; i++; }
             const ents=normalizeEntities(readEntities());
             blocks[bname]=ents;
-            // skip ENDBLK
             if(i<toks.length && toks[i][0]===0 && toks[i][1]==='ENDBLK') i++;
           } else i++;
         }
@@ -362,7 +352,6 @@ function parseDXF(text){
     }
     i++;
   }
-  // resolve INSERTs -> explode block geometry into world coords, keep INSERT's layer
   const resolved=[];
   function pushResolved(e, layerOverride){
     const lay = layerOverride||e.layer;
@@ -377,7 +366,6 @@ function parseDXF(text){
       const ox=e.dxf.x||0, oy=e.dxf.y||0, sx=e.dxf.sx||1, sy=e.dxf.sy||1, rot=(e.dxf.rot||0)*Math.PI/180;
       const cos=Math.cos(rot), sin=Math.sin(rot);
       for(const be of blocks[e.dxf.name]){
-        // Layer 0 inherits the INSERT layer; explicitly assigned layers stay intact.
         const childLayer=(!be.layer||be.layer==='0')?e.layer:be.layer;
         if(be.type==='LWPOLYLINE'){
           const vs=be.verts.map(([x,y])=>{
@@ -409,11 +397,11 @@ window.__parseDXF=parseDXF;
 const S = {
   raw:null, mods:[], carriers:[], barred:[], env:[], buildings:[], roofs:[],
   layers:{},
-  edgeCands:[],        // {id,a,b,len,interior,assigned:null|type}
-  assign:{},           // id -> type  (First/Traufe/Ort/Grat/Kehle)
-  assignSnow:{},       // id -> true  (Schneefang, zusätzlich zum Kantentyp möglich)
-  drawnEdges:[],       // free-drawn {a,b,len,type}
-  auraUser:null,       // Nutzer-Aura-Layout: {gebäude:{frame:{cc,ss},plates:[{x,y,w,h}]}}
+  edgeCands:[],        
+  assign:{},           
+  assignSnow:{},       
+  drawnEdges:[],       
+  auraUser:null,       
   params:{ h0:1000, neigung:12, ortVariante:'seitenanschluss', firstVariante:'standard', firstSeiten:2, auraGlobal:true, schneefang:false },
   activeBuilding:'ALL', activeTool:null, result:null
 };
@@ -440,13 +428,12 @@ function canonicalLayer(name){
 const H=(a,b)=>Math.hypot(b[0]-a[0],b[1]-a[1]);
 const mid=(a,b)=>[(a[0]+b[0])/2,(a[1]+b[1])/2];
 const ang=(a,b)=>(((Math.atan2(b[1]-a[1],b[0]-a[0])*180/Math.PI)%180)+180)%180;
-function r1(x){return Math.round(x*10)/10;}
-
 function longEdge(v){let b=0,a=0;for(let i=0;i<v.length-1;i++){const dx=v[i+1][0]-v[i][0],dy=v[i+1][1]-v[i][1],l=Math.hypot(dx,dy);if(l>b){b=l;a=Math.atan2(dy,dx);}}return{len:b,ang:a};}
 function centroid(v){let x=0,y=0,n=0;for(const[px,py]of v){x+=px;y+=py;n++;}return[x/n,y/n];}
 function polyArea(v){let s=0;for(let i=0;i<v.length;i++){const[x1,y1]=v[i],[x2,y2]=v[(i+1)%v.length];s+=x1*y2-x2*y1;}return Math.abs(s)/2;}
 function pointInPoly(pt,poly){let c=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const xi=poly[i][0],yi=poly[i][1],xj=poly[j][0],yj=poly[j][1];if(((yi>pt[1])!==(yj>pt[1]))&&(pt[0]<(xj-xi)*(pt[1]-yi)/(yj-yi)+xi))c=!c;}return c;}
 function polyLen(v){let s=0;for(let i=0;i<v.length-1;i++)s+=H(v[i],v[i+1]);return s;}
+function r1(x){return Math.round(x*10)/10;}
 
 // Oblicza czynnik rzutowania z DXF (cosinus nachylenia), aby skompensować wymiary
 function getPitchFactor(bname) {
@@ -592,7 +579,7 @@ function auraForBuilding(b){
   // Na rzucie 2D skraca się ona do 780mm * cos(pitch).
   const cosP = getPitchFactor(b.name);
   const TRUE_PH = 0.78; 
-  const ROW = TRUE_PH * cosP, PH = TRUE_PH * cosP, MINW = 0.40, GAP = 0.01;
+  const ROW = TRUE_PH * cosP, PH = TRUE_PH * cosP, MINW = 0.05, GAP = 0.01;
   const WIDTHS=[2.77,1.94,1.38];
   
   let rx0=1e9,ry0=1e9,rx1=-1e9,ry1=-1e9;carrR.forEach(v=>v.forEach(([x,y])=>{rx0=Math.min(rx0,x);ry0=Math.min(ry0,y);rx1=Math.max(rx1,x);ry1=Math.max(ry1,y);}));
@@ -625,7 +612,7 @@ function auraForBuilding(b){
     for(const y of ysR){ if(!onRoof(x,y)||isMod(x,y)) return false; }
     if(isBar(x,yb+PH/2)) return false;
     
-    // Blokada odległości od kalenicy (First)
+    // Blokada odległości od kalenicy (First) - 300 mm rzeczywistej
     if(firstEdges.length){
       const pt = inv([x, yb + PH]);
       for(const [fa, fb] of firstEdges){
@@ -654,7 +641,6 @@ function auraForBuilding(b){
     let cx=a; let guard=0;
     while(bb-cx>=MINW && guard++<80){
       const w=bb-cx;
-      
       let std=null;
       for(const s of [2.77,1.94,1.38]){ if(s<=w+0.06){ const rem=w-s; if(rem<=0.06||rem>=MINW){std=s;break;} } }
       if(std!=null){
@@ -705,6 +691,7 @@ function buildingFrame(b){
   const dom=angs.length?angs[Math.floor(angs.length/2)]:0;
   return {cc:Math.cos(-dom), ss:Math.sin(-dom)};
 }
+
 function auraFromUser(b){
   const u=S.auraUser && S.auraUser[b.name];
   if(!u) return null;
@@ -719,7 +706,7 @@ function auraFromUser(b){
     let kind;
     if(std){ const k=std===2.77?2770:std===1.94?1940:1380; byWidth[k]++; kind=String(k); }
     else { byWidth.cut++; cutWidths.push(wmm); kind='cut'; }
-    // m2 kompensowane o spadek, aby liczyło poprawne rzeczywiste zapotrzebowanie
+    // m2 kompensowane o spadek
     m2 += p.w * (p.h / cosP);
     plateRects.push({verts:[[p.x,p.y],[p.x+p.w,p.y],[p.x+p.w,p.y+p.h],[p.x,p.y+p.h]].map(inv), w:wmm, kind});
   });
@@ -800,7 +787,6 @@ function edgeLengthsByBuilding(){
   
   function add(a,b,len,type){
     const nm=nearestBuilding(mid(a,b));
-    // Przelicza długość z uwzględnieniem kąta dachu (prawdziwa dł. w metrach)
     const tLen = trueLength(nm, a, b);
     out[nm][type]+=tLen;
     if(type==='First')out[nm].firstLines.push(tLen);
@@ -1115,6 +1101,8 @@ const visibleBuilding=bn=>St().activeBuilding==='ALL'||St().activeBuilding===bn;
 const visiblePoly=v=>St().activeBuilding==='ALL'||A().nearestBuilding(A().centroid(v))===St().activeBuilding;
 
 let VIEW={x0:0,y0:0,scale:1,baseScale:1,zoom:1,panx:0,pany:0,W:900,H:560,pad:24}; 
+let zonePoints=[];
+let zoneMouse=null;
 let drawStart=null; 
 
 function setStep(n){$$('.step').forEach(s=>{const v=+s.dataset.s;s.classList.toggle('active',v===n);s.classList.toggle('done',v<n);});$('#s1').classList.toggle('hidden',n>1);$('#s2').classList.toggle('hidden',n<2);}
@@ -1186,7 +1174,7 @@ function buildParams(){
   if(S0.roofs && S0.roofs.length){
     box.appendChild(roofPitchPanel(S0.roofs));
   } else {
-    box.appendChild(field('Dachneigung','grad',numIn('neigung',p.neigung,1,60),'Schneefang-Stützentyp (2-Rohr 10–24°, 3-Rohr 25–45°).'));
+    box.appendChild(field('Dachneigung','grad',numIn('neigung',p.neigung,1,60),'Wichtig: Kompensiert automatisch die Längen aus dem flachen PV*Sol DXF.'));
   }
   box.appendChild(field('Ort-Ausbildung',null,selStr('ortVariante',[['seitenanschluss','Seitenanschlussprofil'],['ueberstehend','Ort überstehend'],['rinne','Ortrinne'],['keiner','Kein Ortprofil']],p.ortVariante),'Nur „Seitenanschlussprofil" erzeugt Ortprofile.'));
   box.appendChild(field('First-Variante',null,selStr('firstVariante',[['standard','Standard'],['variabel','Variable Entlüftung'],['aura','First an Aura 2'],['strackort','Strackort']],p.firstVariante),'Komponentenbreite adaptiv 2770/1940.'));
@@ -1237,11 +1225,11 @@ function buildPalette(){
     const b=el('button','edgebtn'+(S.activeTool===t?' on':''));
     b.style.setProperty('--c',ET()[t].col);
     b.innerHTML=`<i style="background:${ET()[t].col}"></i>${ET()[t].label}`;
-    b.onclick=()=>{const leavingAura=S.activeTool==='__aura';S.activeTool=(S.activeTool===t?null:t);drawStart=null;if(leavingAura)setEditorExpanded(false);buildPalette();drawPlan();};
+    b.onclick=()=>{const leavingAura=S.activeTool==='__aura';S.activeTool=(S.activeTool===t?null:t);drawStart=null;zonePoints=[];if(leavingAura)setEditorExpanded(false);buildPalette();drawPlan();};
     box.appendChild(b);
   });
   const draw=el('button','edgebtn'+(S.activeTool==='__draw'?' on':''),'✎ Freihand');
-  draw.onclick=()=>{const leavingAura=S.activeTool==='__aura';S.activeTool=(S.activeTool==='__draw'?null:'__draw');drawStart=null;if(leavingAura)setEditorExpanded(false);buildPalette();drawPlan();};
+  draw.onclick=()=>{const leavingAura=S.activeTool==='__aura';S.activeTool=(S.activeTool==='__draw'?null:'__draw');drawStart=null;zonePoints=[];if(leavingAura)setEditorExpanded(false);buildPalette();drawPlan();};
   box.appendChild(draw);
   
   const aurZ = el('button', 'edgebtn' + (S.activeTool === '__aurazone' ? ' on' : ''), '▧ Aura-Feld zeichnen');
@@ -1251,6 +1239,7 @@ function buildPalette(){
     S.activeTool = (leaving ? null : '__aurazone');
     S.auraSel = null;
     drawStart = null;
+    zonePoints = [];
     if (leaving) setEditorExpanded(false);
     buildPalette();
     drawPlan();
@@ -1259,11 +1248,11 @@ function buildPalette(){
 
   const aur=el('button','edgebtn'+(S.activeTool==='__aura'?' on':''),'⬚ Aura bearbeiten');
   aur.style.setProperty('--c','#5a7d3c');
-  aur.onclick=()=>{const leaving=S.activeTool==='__aura';S.activeTool=(leaving?null:'__aura');S.auraSel=null;drawStart=null;if(leaving)setEditorExpanded(false);buildPalette();drawPlan();};
+  aur.onclick=()=>{const leaving=S.activeTool==='__aura';S.activeTool=(leaving?null:'__aura');S.auraSel=null;drawStart=null;zonePoints=[];if(leaving)setEditorExpanded(false);buildPalette();drawPlan();};
   box.appendChild(aur);
 
   const clr=el('button','edgebtn ghost','✕ Auswahl löschen');
-  clr.onclick=()=>{S.assign={};S.assignSnow={};S.drawnEdges=[];S.activeTool=null;drawStart=null;setEditorExpanded(false);buildPalette();A().compute();renderAll();};
+  clr.onclick=()=>{S.assign={};S.assignSnow={};S.drawnEdges=[];S.activeTool=null;drawStart=null;zonePoints=[];setEditorExpanded(false);buildPalette();A().compute();renderAll();};
   box.appendChild(clr);
 
   if(S.activeTool==='__draw'){
@@ -1295,7 +1284,7 @@ function buildPalette(){
       
       const cosP = A().getPitchFactor(bn);
       u.plates.push({x:Math.round((f[0]-0.69)*100)/100, y:Math.round((f[1]-0.435)*100)/100, w:1.38, h:0.78 * cosP});
-      S.auraSel={b:bn,i:u.plates.length-1};
+      S.auraSel={b:bn,indices:[u.plates.length-1]};
       A().compute();renderAll();
     };
     box.appendChild(add);
@@ -1303,15 +1292,18 @@ function buildPalette(){
     del.onclick=()=>{
       if(!S.auraSel)return;
       const u=S.auraUser&&S.auraUser[S.auraSel.b]; if(!u)return;
-      u.plates.splice(S.auraSel.i,1);S.auraSel=null;A().compute();renderAll();
+      S.auraSel.indices.sort((a,b)=>b-a).forEach(idx => u.plates.splice(idx,1));
+      S.auraSel=null;A().compute();renderAll();
     };
     box.appendChild(del);
     const rst=el('button','edgebtn ghost','＋ Auto ergänzen');
     rst.title='Ergänzt nur fehlende automatische Platten und behält das vorhandene Layout';
     rst.onclick=()=>{auraMergeAuto();};
     box.appendChild(rst);
-    if(S.auraSel){
-      const u=S.auraUser&&S.auraUser[S.auraSel.b],p=u&&u.plates[S.auraSel.i];
+    
+    // Tylko jak jest jedna wybrana to pokazujemy dokładne suwaki wymiarów
+    if(S.auraSel && S.auraSel.indices.length === 1){
+      const u=S.auraUser&&S.auraUser[S.auraSel.b], p=u&&u.plates[S.auraSel.indices[0]];
       if(p){
         const cosP = A().getPitchFactor(S.auraSel.b);
         box.appendChild(el('span',null,'Breite mm'));
@@ -1327,9 +1319,9 @@ function buildPalette(){
   }
   $('#editorhint').textContent = S.activeTool==='__draw'
     ? 'Freihand: Startpunkt klicken, dann Endpunkt. Wird als '+(ET()[S.drawType]||{label:''}).label+' gezählt.'
-    : (S.activeTool==='__aura' ? 'Platte ziehen = verschieben · Kante ziehen = Grösse · Alt hält Snap vorübergehend aus · exakte Masse stehen nach Auswahl oben in mm · „Auto ergänzen" behält das vorhandene Layout'+(S.auraMessage?' · '+S.auraMessage:'')
+    : (S.activeTool==='__aura' ? 'Ziehen = Auswahlbox · Platte ziehen = verschieben · Kante ziehen = Grösse · Alt hält Snap aus · Entf = Auswahl löschen'+(S.auraMessage?' · '+S.auraMessage:'')
     : (S.activeTool==='Schneefang' ? 'Klicke Kanten an, um Schneefang zu setzen (zusätzlich zu Traufe möglich). Manuelle Markierung ersetzt die automatische Schneefang-Erkennung.'
-    : (S.activeTool==='__aurazone' ? 'Aura-Feld: Klicke oben links, dann unten rechts, um das Feld automatisch mit Platten zu füllen.'
+    : (S.activeTool==='__aurazone' ? 'Aura-Feld: Klicke Punkte, um ein Polygon zu zeichnen. Klicke nahe Startpunkt oder drücke ENTER zum Füllen.'
     : (S.activeTool ? 'Klicke Kanten an, um sie als '+ET()[S.activeTool].label+' zu markieren.' : 'Wähle oben einen Kanten-Typ, dann klicke Kanten auf dem Plan an.'))));
 }
 
@@ -1371,13 +1363,20 @@ function drawPlan(){
     if(auraEdit){
       Object.keys(S.auraUser).filter(visibleBuilding).forEach(bn=>{
         const u=S.auraUser[bn];
-        u.plates.forEach(p=>{
+        u.plates.forEach((p,i)=>{
           const v=[[p.x,p.y],[p.x+p.w,p.y],[p.x+p.w,p.y+p.h],[p.x,p.y+p.h]].map(([fx,fy])=>auraF2W(u,fx,fy));
-          poly(v,'rgba(90,110,70,.6)',ac[auraKindByW(p.w)]||'#b4b4b4',0.4);
+          // Kolorowanie małych formatek na czerwono
+          const isSmall = p.w < 0.40;
+          const fillCol = isSmall ? 'rgba(220,50,50,0.8)' : (ac[auraKindByW(p.w)]||'#b4b4b4');
+          poly(v,'rgba(90,110,70,.6)', fillCol, 0.4);
         });
       });
     } else if(S.auraRects){
-      S.auraRects.filter(r=>visiblePoly(r.verts)).forEach(r=>poly(r.verts, 'rgba(90,110,70,.6)', ac[r.kind]||'#b4b4b4', 0.4));
+      S.auraRects.filter(r=>visiblePoly(r.verts)).forEach(r=>{
+        const isSmall = r.w < 400; // w mm!
+        const fillCol = isSmall ? 'rgba(220,50,50,0.8)' : (ac[r.kind]||'#b4b4b4');
+        poly(r.verts, 'rgba(90,110,70,.6)', fillCol, 0.4);
+      });
     }
   }
   const col={L:'#1b4f9c',M:'#3a74c4',XL:'#0e3a78'};
@@ -1414,10 +1413,34 @@ function drawPlan(){
   
   S.drawnEdges.filter(e=>visiblePoly([e.a,e.b])).forEach(e=>poly([e.a,e.b],ET()[e.type].col,null,3.5));
   
-  if(drawStart){
+  if(drawStart && S.activeTool === '__draw'){
     const[X,Y]=W2S(drawStart[0],drawStart[1]);
     ctx.beginPath();ctx.arc(X,Y,4,0,7);
-    ctx.fillStyle = S.activeTool==='__aurazone' ? '#d98a1f' : ET()[S.drawType||'First'].col;
+    ctx.fillStyle = ET()[S.drawType||'First'].col;
+    ctx.fill();
+  }
+
+  // Aura Zone Polygons
+  if(S.activeTool === '__aurazone' && zonePoints.length > 0) {
+    ctx.beginPath();
+    const startS = W2S(zonePoints[0][0], zonePoints[0][1]);
+    ctx.moveTo(startS[0], startS[1]);
+    for(let i=1; i<zonePoints.length; i++){
+      const s = W2S(zonePoints[i][0], zonePoints[i][1]);
+      ctx.lineTo(s[0], s[1]);
+    }
+    if(zoneMouse){
+      const mS = W2S(zoneMouse[0], zoneMouse[1]);
+      ctx.lineTo(mS[0], mS[1]);
+    }
+    ctx.strokeStyle = '#d98a1f';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5,5]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    
+    ctx.beginPath();ctx.arc(startS[0], startS[1], 6, 0, 7);
+    ctx.fillStyle = '#d98a1f';
     ctx.fill();
   }
 
@@ -1450,16 +1473,19 @@ function drawPlan(){
         const c=auraF2W(u,p.x+p.w/2,p.y+p.h/2);const[X,Y]=W2S(c[0],c[1]);
         ctx.font='10px ui-monospace,monospace';ctx.fillStyle='rgba(30,40,20,.85)';
         ctx.fillText(String(Math.round(p.w*1000)),X,Y);
-        if(S.auraSel&&S.auraSel.b===bn&&S.auraSel.i===i){
+        if(S.auraSel&&S.auraSel.b===bn&&S.auraSel.indices.includes(i)){
           const cor=[[p.x,p.y],[p.x+p.w,p.y],[p.x+p.w,p.y+p.h],[p.x,p.y+p.h],[p.x,p.y]]
             .map(([fx,fy])=>{const w=auraF2W(u,fx,fy);return W2S(w[0],w[1]);});
           ctx.beginPath();cor.forEach((q,k)=>k?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1]));
           ctx.strokeStyle='#c0392b';ctx.lineWidth=2;ctx.setLineDash([]);ctx.stroke();
-          [[p.x+p.w/2,p.y],[p.x+p.w,p.y+p.h/2],[p.x+p.w/2,p.y+p.h],[p.x,p.y+p.h/2]].forEach(([fx,fy])=>{
-            const w=auraF2W(u,fx,fy);const[hx,hy]=W2S(w[0],w[1]);
-            ctx.fillStyle='#fff';ctx.fillRect(hx-4,hy-4,8,8);
-            ctx.fillStyle='#c0392b';ctx.fillRect(hx-3,hy-3,6,6);
-          });
+          
+          if(S.auraSel.indices.length === 1) {
+            [[p.x+p.w/2,p.y],[p.x+p.w,p.y+p.h/2],[p.x+p.w/2,p.y+p.h],[p.x,p.y+p.h/2]].forEach(([fx,fy])=>{
+              const w=auraF2W(u,fx,fy);const[hx,hy]=W2S(w[0],w[1]);
+              ctx.fillStyle='#fff';ctx.fillRect(hx-4,hy-4,8,8);
+              ctx.fillStyle='#c0392b';ctx.fillRect(hx-3,hy-3,6,6);
+            });
+          }
           const t=auraF2W(u,p.x+p.w/2,p.y+p.h);const[tx,ty]=W2S(t[0],t[1]);
           ctx.font='bold 11px ui-monospace,monospace';ctx.fillStyle='#c0392b';
           ctx.fillText(Math.round(p.w*1000)+' × '+Math.round((p.h/cosP)*1000)+' mm',tx,ty-12);
@@ -1468,6 +1494,18 @@ function drawPlan(){
     });
     ctx.textAlign='start';ctx.textBaseline='alphabetic';
   }
+
+  // Draw Selection Box
+  if (S.activeTool === '__aura' && window.auraDrag && window.auraDrag.type === 'select') {
+    const [sx1, sy1] = W2S(window.auraDrag.startW[0], window.auraDrag.startW[1]);
+    const [sx2, sy2] = W2S(window.auraDrag.endW[0], window.auraDrag.endW[1]);
+    ctx.fillStyle = 'rgba(27, 79, 156, 0.2)';
+    ctx.strokeStyle = 'var(--blue)';
+    ctx.lineWidth = 1;
+    ctx.fillRect(sx1, sy1, sx2-sx1, sy2-sy1);
+    ctx.strokeRect(sx1, sy1, sx2-sx1, sy2-sy1);
+  }
+
   $('#planmeta').textContent=`${mods.length} Module · ${visibleCarriers.length} Dachflächen`;
 }
 
@@ -1559,16 +1597,59 @@ function auraSnapCands(bn){
   };
   (b?b.mods:[]).forEach(m=>addBox(m.v));
   (S.barred||[]).filter(v=>A().nearestBuilding(A().centroid(v))===bn).forEach(v=>addBox(v)); 
-  u.plates.forEach((p,i)=>{ if(S.auraSel&&S.auraSel.b===bn&&S.auraSel.i===i)return; xs.push(p.x,p.x+p.w);ys.push(p.y,p.y+p.h); });
+  u.plates.forEach((p,i)=>{ if(S.auraSel&&S.auraSel.b===bn&&S.auraSel.indices.includes(i))return; xs.push(p.x,p.x+p.w);ys.push(p.y,p.y+p.h); });
   return {xs,ys};
 }
 function snapTo(v,cands,tol){let best=v,bd=tol;for(const c of cands){const d=Math.abs(c-v);if(d<bd){bd=d;best=c;}}return best;}
 function snapDelta(edges,cands,tol){let delta=0,bd=tol;for(const e of edges)for(const c of cands){const d=c-e;if(Math.abs(d)<bd){bd=Math.abs(d);delta=d;}}return delta;}
 
+function finishAuraZone() {
+  const S=St();
+  if (zonePoints.length < 3) { zonePoints=[]; zoneMouse=null; drawPlan(); return; }
+  auraEnsureUser();
+  const bn = S.activeBuilding !== 'ALL' ? S.activeBuilding : A().nearestBuilding(zonePoints[0]);
+  if(S.auraUser[bn]) {
+    const u = S.auraUser[bn];
+    const polyF = zonePoints.map(pt => auraW2F(u, pt[0], pt[1]));
+    
+    let minY = 1e9, maxY = -1e9;
+    polyF.forEach(p => { minY=Math.min(minY, p[1]); maxY=Math.max(maxY, p[1]); });
+    
+    const cosP = A().getPitchFactor(bn);
+    const pW = 1.38;
+    const pH = 0.78 * cosP;
+    
+    for (let py = minY; py + pH <= maxY + 0.1; py += pH) {
+      const yC = py + pH/2;
+      let xs = [];
+      for(let i=0; i<polyF.length; i++) {
+        const a = polyF[i], b = polyF[(i+1)%polyF.length];
+        if ((a[1] <= yC && b[1] > yC) || (b[1] <= yC && a[1] > yC)) {
+          xs.push(a[0] + (yC - a[1])/(b[1] - a[1])*(b[0] - a[0]));
+        }
+      }
+      xs.sort((a,b)=>a-b);
+      for(let i=0; i<xs.length-1; i+=2) {
+        let cx = xs[i], endX = xs[i+1];
+        while(cx + 0.001 < endX) {
+          let width = Math.min(pW, endX - cx);
+          u.plates.push({x: cx, y: py, w: width, h: pH});
+          cx += width;
+        }
+      }
+    }
+  }
+  zonePoints = [];
+  zoneMouse = null;
+  S.activeTool = null; 
+  buildPalette();
+  A().compute();
+  renderAll();
+}
+
 function setupCanvas(){
   const cv=$('#plan');
   let dragging=false, dragMoved=false, lastX=0, lastY=0;
-  let auraDrag=null; 
   
   cv.addEventListener('wheel',ev=>{
     ev.preventDefault();
@@ -1589,12 +1670,21 @@ function setupCanvas(){
       auraEnsureUser();
       const h=auraHit(x,y);
       if(h){
-        S.auraSel={b:h.b,i:h.i};
-        auraDrag={b:h.b,i:h.i,edge:h.edge,f0:h.f,orig:Object.assign({},S.auraUser[h.b].plates[h.i]),cands:auraSnapCands(h.b)};
+        if (!S.auraSel || S.auraSel.b !== h.b || !S.auraSel.indices.includes(h.i)) {
+          S.auraSel={b:h.b, indices:[h.i]};
+        }
+        window.auraDrag={
+          type: 'move', b:h.b, edge:h.edge, f0:h.f,
+          origs: S.auraSel.indices.map(idx => ({i: idx, ...S.auraUser[h.b].plates[idx]})),
+          cands: auraSnapCands(h.b)
+        };
         buildPalette();drawPlan();
         return;
       }
-      if(S.auraSel){S.auraSel=null;buildPalette();drawPlan();}
+      S.auraSel = null;
+      window.auraDrag = { type: 'select', startW: S2W(x, y), endW: S2W(x, y) };
+      buildPalette();drawPlan();
+      return;
     }
     
     if(S.activeTool==='__aurazone' || S.activeTool==='__draw') return;
@@ -1603,41 +1693,92 @@ function setupCanvas(){
   });
   
   window.addEventListener('mouseup',()=>{
+    const S = St();
     dragging=false;
-    if(auraDrag){auraDrag=null;A().compute();renderAll();}
+    if(window.auraDrag){
+      if(window.auraDrag.type === 'select'){
+        const [wx1, wy1] = window.auraDrag.startW;
+        const [wx2, wy2] = window.auraDrag.endW;
+        const minW_X = Math.min(wx1, wx2), maxW_X = Math.max(wx1, wx2);
+        const minW_Y = Math.min(wy1, wy2), maxW_Y = Math.max(wy1, wy2);
+        
+        let selectedBn = null;
+        let indices = [];
+        for (const bn of Object.keys(S.auraUser).filter(visibleBuilding)) {
+           const u = S.auraUser[bn];
+           for (let i = 0; i < u.plates.length; i++) {
+             const p = u.plates[i];
+             const cW = auraF2W(u, p.x + p.w/2, p.y + p.h/2);
+             if (cW[0] >= minW_X && cW[0] <= maxW_X && cW[1] >= minW_Y && cW[1] <= maxW_Y) {
+               selectedBn = bn;
+               indices.push(i);
+             }
+           }
+           if (selectedBn) break; 
+        }
+        if (selectedBn && indices.length > 0) {
+          S.auraSel = { b: selectedBn, indices };
+        }
+      }
+      window.auraDrag=null;
+      A().compute();
+      renderAll();
+    }
   });
   
   cv.addEventListener('mousemove',ev=>{
     const S=St();const[sx,sy]=canvasXY(ev);
-    if(auraDrag){
-      const u=S.auraUser[auraDrag.b];
-      const wpt=S2W(sx,sy);
-      const f=auraW2F(u,wpt[0],wpt[1]);
-      const dx=f[0]-auraDrag.f0[0], dy=f[1]-auraDrag.f0[1];
-      const p=u.plates[auraDrag.i],o=auraDrag.orig,C=auraDrag.cands;
-      const scale=(VIEW.baseScale||1)*(VIEW.zoom||1),T=Math.min(.04,8/scale);
-      const doSnap=S.auraSnap!==false&&!ev.altKey;
-      const r3=v=>Math.round(v*1000)/1000;
-      if(!auraDrag.edge){
-        let nx=r3(o.x+dx),ny=r3(o.y+dy);
-        if(doSnap){nx=r3(nx+snapDelta([nx,nx+o.w],C.xs,T));ny=r3(ny+snapDelta([ny,ny+o.h],C.ys,T));}
-        p.x=nx;p.y=ny;
-      } else if(auraDrag.edge==='e'){
-        const raw=Math.max(.2,o.w+dx),cands=AURA_STD.concat(C.xs.map(x=>x-o.x).filter(x=>x>=.2));
-        p.w=r3(doSnap?snapTo(raw,cands,T):raw);
-      } else if(auraDrag.edge==='w'){
-        const right=o.x+o.w,raw=Math.max(.2,o.w-dx),cands=AURA_STD.concat(C.xs.map(x=>right-x).filter(x=>x>=.2));
-        const wN=r3(doSnap?snapTo(raw,cands,T):raw);p.x=r3(right-wN);p.w=wN;
-      } else if(auraDrag.edge==='n'){
-        const raw=Math.max(.2,o.h+dy),cands=[.43,.87].concat(C.ys.map(y=>y-o.y).filter(y=>y>=.2));
-        p.h=r3(doSnap?snapTo(raw,cands,T):raw);
-      } else if(auraDrag.edge==='s'){
-        const top=o.y+o.h,raw=Math.max(.2,o.h-dy),cands=[.43,.87].concat(C.ys.map(y=>top-y).filter(y=>y>=.2));
-        const hN=r3(doSnap?snapTo(raw,cands,T):raw);p.y=r3(top-hN);p.h=hN;
-      }
+    
+    if (window.auraDrag && window.auraDrag.type === 'select') {
+      window.auraDrag.endW = S2W(sx, sy);
       drawPlan();
       return;
     }
+    
+    if(window.auraDrag && window.auraDrag.type === 'move'){
+      const u=S.auraUser[window.auraDrag.b];
+      const wpt=S2W(sx,sy);
+      const f=auraW2F(u,wpt[0],wpt[1]);
+      const dx=f[0]-window.auraDrag.f0[0], dy=f[1]-window.auraDrag.f0[1];
+      const scale=(VIEW.baseScale||1)*(VIEW.zoom||1),T=Math.min(.04,8/scale);
+      const doSnap=S.auraSnap!==false&&!ev.altKey;
+      const r3=v=>Math.round(v*1000)/1000;
+      
+      window.auraDrag.origs.forEach(origObj => {
+        const p = u.plates[origObj.i];
+        const o = origObj;
+        if(!window.auraDrag.edge){
+          let nx=r3(o.x+dx),ny=r3(o.y+dy);
+          if(doSnap && window.auraDrag.origs.length === 1){
+            nx=r3(nx+snapDelta([nx,nx+o.w],window.auraDrag.cands.xs,T));
+            ny=r3(ny+snapDelta([ny,ny+o.h],window.auraDrag.cands.ys,T));
+          }
+          p.x=nx;p.y=ny;
+        } else if(window.auraDrag.edge==='e'){
+          const raw=Math.max(.2,o.w+dx),cands=AURA_STD.concat(window.auraDrag.cands.xs.map(x=>x-o.x).filter(x=>x>=.2));
+          p.w=r3((doSnap && window.auraDrag.origs.length===1)?snapTo(raw,cands,T):raw);
+        } else if(window.auraDrag.edge==='w'){
+          const right=o.x+o.w,raw=Math.max(.2,o.w-dx),cands=AURA_STD.concat(window.auraDrag.cands.xs.map(x=>right-x).filter(x=>x>=.2));
+          const wN=r3((doSnap && window.auraDrag.origs.length===1)?snapTo(raw,cands,T):raw);
+          p.x=r3(right-wN);p.w=wN;
+        } else if(window.auraDrag.edge==='n'){
+          const raw=Math.max(.2,o.h+dy),cands=[.43,.87].concat(window.auraDrag.cands.ys.map(y=>y-o.y).filter(y=>y>=.2));
+          p.h=r3((doSnap && window.auraDrag.origs.length===1)?snapTo(raw,cands,T):raw);
+        } else if(window.auraDrag.edge==='s'){
+          const top=o.y+o.h,raw=Math.max(.2,o.h-dy),cands=[.43,.87].concat(window.auraDrag.cands.ys.map(y=>top-y).filter(y=>y>=.2));
+          const hN=r3((doSnap && window.auraDrag.origs.length===1)?snapTo(raw,cands,T):raw);
+          p.y=r3(top-hN);p.h=hN;
+        }
+      });
+      drawPlan();
+      return;
+    }
+    
+    if (S.activeTool === '__aurazone') {
+       zoneMouse = S2W(sx, sy);
+       if (zonePoints.length > 0) drawPlan();
+    }
+    
     if(dragging){const dx=sx-lastX,dy=sy-lastY;if(Math.abs(dx)+Math.abs(dy)>2)dragMoved=true;VIEW.panx+=dx;VIEW.pany+=dy;lastX=sx;lastY=sy;drawPlan();cv.style.cursor='grabbing';return;}
     if(!S.activeTool){cv.style.cursor='grab';return;}
     if(S.activeTool==='__draw' || S.activeTool==='__aurazone'){cv.style.cursor='crosshair';return;}
@@ -1656,44 +1797,12 @@ function setupCanvas(){
     if(S.activeTool==='__aurazone'){
       const[sx,sy]=canvasXY(ev);
       const w=S2W(sx,sy);
-      if(!drawStart){
-        drawStart=w; 
-        drawPlan();  
+      
+      if(zonePoints.length > 0 && window.__SUN.H(zonePoints[0], w) < 0.5) {
+         finishAuraZone();
       } else {
-        auraEnsureUser();
-        const bn = S.activeBuilding !== 'ALL' ? S.activeBuilding : A().nearestBuilding(w);
-        if(S.auraUser[bn]) {
-          const u = S.auraUser[bn];
-          const f1 = auraW2F(u, drawStart[0], drawStart[1]);
-          const f2 = auraW2F(u, w[0], w[1]);
-          
-          const minX = Math.min(f1[0], f2[0]);
-          const minY = Math.min(f1[1], f2[1]);
-          const maxX = Math.max(f1[0], f2[0]);
-          const maxY = Math.max(f1[1], f2[1]);
-          
-          const cosP = A().getPitchFactor(bn);
-          const pW = 1.38;
-          const pH = 0.78 * cosP; 
-          
-          u.plates = u.plates.filter(p => {
-             const cx = p.x + p.w/2;
-             const cy = p.y + p.h/2;
-             return !(cx >= minX && cx <= maxX && cy >= minY && cy <= maxY);
-          });
-
-          for(let py = minY; py + pH <= maxY + 0.1; py += pH) {
-            for(let px = minX; px + pW <= maxX + 0.1; px += pW) {
-              const width = (px + pW > maxX) ? (maxX - px) : pW;
-              if(width > 0.2) u.plates.push({x: px, y: py, w: width, h: pH});
-            }
-          }
-        }
-        drawStart = null;
-        S.activeTool = null; 
-        buildPalette();
-        A().compute();
-        renderAll();
+         zonePoints.push(w);
+         drawPlan();
       }
       return;
     }
@@ -1728,13 +1837,23 @@ function setupCanvas(){
   
   window.addEventListener('keydown',ev=>{
     const S=St();
-    if(ev.key==='Escape'&&$('#editorpanel').classList.contains('expanded')){setEditorExpanded(false);buildPalette();return;}
+    if(ev.key==='Escape'){
+      if(zonePoints.length > 0) { zonePoints = []; zoneMouse = null; drawPlan(); return; }
+      if($('#editorpanel').classList.contains('expanded')){setEditorExpanded(false);buildPalette();return;}
+    }
+    if(ev.key==='Enter' && S.activeTool==='__aurazone' && zonePoints.length > 2){
+      finishAuraZone(); return;
+    }
     if(S.activeTool!=='__aura'||!S.auraSel)return;
     if(ev.key!=='Delete'&&ev.key!=='Backspace')return;
     if(/INPUT|SELECT|TEXTAREA/.test((ev.target&&ev.target.tagName)||''))return;
     ev.preventDefault();
     const u=S.auraUser&&S.auraUser[S.auraSel.b];
-    if(u){u.plates.splice(S.auraSel.i,1);S.auraSel=null;A().compute();renderAll();}
+    if(u){
+      S.auraSel.indices.sort((a,b)=>b-a).forEach(idx => u.plates.splice(idx,1));
+      S.auraSel=null;
+      A().compute();renderAll();
+    }
   });
 }
 
