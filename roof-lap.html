@@ -949,6 +949,11 @@ function compute(){
   S.result={rows,buildings:B,edges,aura};return S.result;
 }
 
+function r1(x){return Math.round(x*10)/10;}
+
+function analyzeGrid(b){
+  const tiles=[];
+
 function analyzeGrid(b){
   const tiles=[];
   b.mods.forEach(m=>tiles.push({v:m.v}));
