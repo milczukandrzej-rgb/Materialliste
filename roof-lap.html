@@ -206,7 +206,7 @@
           <div class="preview" style="position:relative">
             <canvas id="plan" width="900" height="560"></canvas>
             <div class="zoomctl" style="position:absolute;right:10px;bottom:10px;display:flex;flex-direction:column;gap:4px">
-              <button id="zoomin"  title="Vergrössern"  style="width:30px;height:30px;font-size:18px;line-height:1;border:1px solid var(--line);background:#fff;border-radius:6px;cursor:pointer">+</button>
+              <button id="zoomin"  title="Vergrößern"  style="width:30px;height:30px;font-size:18px;line-height:1;border:1px solid var(--line);background:#fff;border-radius:6px;cursor:pointer">+</button>
               <button id="zoomout" title="Verkleinern"  style="width:30px;height:30px;font-size:18px;line-height:1;border:1px solid var(--line);background:#fff;border-radius:6px;cursor:pointer">−</button>
               <button id="zoomfit" title="Einpassen"    style="width:30px;height:30px;font-size:12px;line-height:1;border:1px solid var(--line);background:#fff;border-radius:6px;cursor:pointer">⤢</button>
             </div>
@@ -252,6 +252,7 @@
   <span>Stückzahlen prüfen · „Die Masse sind auf dem Bau zu kontrollieren"</span>
 </footer>
 
+<!-- Offline XLSX export is implemented below; no external scripts required. -->
 <script>
 /* ============================================================
    DXF PARSER  (minimal, tuned for PV*Sol / EliteCAD exports)
@@ -259,10 +260,13 @@
    ============================================================ */
 function parseDXF(text){
   const lines = text.split(/\r\n|\r|\n/);
+  // tokenize into (code,value) pairs
   const toks=[];
   for(let i=0;i<lines.length-1;i+=2){
     toks.push([parseInt(lines[i].trim(),10), lines[i+1]]);
   }
+  // Keep the drawing unit from the HEADER. It is only used as a fallback when
+  // no module geometry is available to infer the scale more reliably.
   let insUnits=null;
   for(let k=0;k<toks.length;k++){
     if(toks[k][0]===9&&String(toks[k][1]).trim()==='$INSUNITS'){
@@ -270,6 +274,7 @@ function parseDXF(text){
       break;
     }
   }
+  // split sections
   let i=0;
   const blocks={};         // name -> array of entities (in block coords)
   const entities=[];       // modelspace entities
@@ -281,10 +286,11 @@ function parseDXF(text){
       if(code===0){
         const type=val; i++;
         const ent={type,layer:'0',verts:[],dxf:{}};
+        // read until next 0
         while(i<toks.length && toks[i][0]!==0){
           const [c,v]=toks[i];
           if(c===8) ent.layer=v;
-          else if(c===2) ent.dxf.name=v;            
+          else if(c===2) ent.dxf.name=v;            // block name (INSERT)
           else if(c===10) ent.dxf.x=parseFloat(v);
           else if(c===20) ent.dxf.y=parseFloat(v);
           else if(c===41) ent.dxf.sx=parseFloat(v);
@@ -306,6 +312,8 @@ function parseDXF(text){
     }
     return out;
   }
+  // AutoCAD may write a closed shape either as LWPOLYLINE or as the older
+  // POLYLINE + VERTEX ... + SEQEND sequence. Convert both to one representation.
   function normalizeEntities(list){
     const out=[];
     for(let n=0;n<list.length;n++){
@@ -326,9 +334,11 @@ function parseDXF(text){
     return out;
   }
   function dist(a,b){return Math.hypot(b[0]-a[0],b[1]-a[1]);}
+  // walk sections
   while(i<toks.length){
     const [code,val]=toks[i];
     if(code===0 && val==='SECTION'){
+      // find section name (code 2)
       let sname='';
       let j=i+1;
       while(j<toks.length && toks[j][0]!==0){ if(toks[j][0]===2) sname=toks[j][1]; j++; }
@@ -340,6 +350,7 @@ function parseDXF(text){
             while(i<toks.length && toks[i][0]!==0){ if(toks[i][0]===2) bname=toks[i][1]; i++; }
             const ents=normalizeEntities(readEntities());
             blocks[bname]=ents;
+            // skip ENDBLK
             if(i<toks.length && toks[i][0]===0 && toks[i][1]==='ENDBLK') i++;
           } else i++;
         }
@@ -351,6 +362,7 @@ function parseDXF(text){
     }
     i++;
   }
+  // resolve INSERTs -> explode block geometry into world coords, keep INSERT's layer
   const resolved=[];
   function pushResolved(e, layerOverride){
     const lay = layerOverride||e.layer;
@@ -365,6 +377,7 @@ function parseDXF(text){
       const ox=e.dxf.x||0, oy=e.dxf.y||0, sx=e.dxf.sx||1, sy=e.dxf.sy||1, rot=(e.dxf.rot||0)*Math.PI/180;
       const cos=Math.cos(rot), sin=Math.sin(rot);
       for(const be of blocks[e.dxf.name]){
+        // Layer 0 inherits the INSERT layer; explicitly assigned layers stay intact.
         const childLayer=(!be.layer||be.layer==='0')?e.layer:be.layer;
         if(be.type==='LWPOLYLINE'){
           const vs=be.verts.map(([x,y])=>{
@@ -396,11 +409,11 @@ window.__parseDXF=parseDXF;
 const S = {
   raw:null, mods:[], carriers:[], barred:[], env:[], buildings:[], roofs:[],
   layers:{},
-  edgeCands:[],        
-  assign:{},           
-  assignSnow:{},       
-  drawnEdges:[],       
-  auraUser:null,       
+  edgeCands:[],        // {id,a,b,len,interior,assigned:null|type}
+  assign:{},           // id -> type  (First/Traufe/Ort/Grat/Kehle)
+  assignSnow:{},       // id -> true  (Schneefang, zusätzlich zum Kantentyp möglich)
+  drawnEdges:[],       // free-drawn {a,b,len,type}
+  auraUser:null,       // Nutzer-Aura-Layout: {gebäude:{frame:{cc,ss},plates:[{x,y,w,h}]}}
   params:{ h0:1000, neigung:12, ortVariante:'seitenanschluss', firstVariante:'standard', firstSeiten:2, auraGlobal:true, schneefang:false },
   activeBuilding:'ALL', activeTool:null, result:null
 };
@@ -427,6 +440,8 @@ function canonicalLayer(name){
 const H=(a,b)=>Math.hypot(b[0]-a[0],b[1]-a[1]);
 const mid=(a,b)=>[(a[0]+b[0])/2,(a[1]+b[1])/2];
 const ang=(a,b)=>(((Math.atan2(b[1]-a[1],b[0]-a[0])*180/Math.PI)%180)+180)%180;
+function r1(x){return Math.round(x*10)/10;}
+
 function longEdge(v){let b=0,a=0;for(let i=0;i<v.length-1;i++){const dx=v[i+1][0]-v[i][0],dy=v[i+1][1]-v[i][1],l=Math.hypot(dx,dy);if(l>b){b=l;a=Math.atan2(dy,dx);}}return{len:b,ang:a};}
 function centroid(v){let x=0,y=0,n=0;for(const[px,py]of v){x+=px;y+=py;n++;}return[x/n,y/n];}
 function polyArea(v){let s=0;for(let i=0;i<v.length;i++){const[x1,y1]=v[i],[x2,y2]=v[(i+1)%v.length];s+=x1*y2-x2*y1;}return Math.abs(s)/2;}
@@ -600,26 +615,24 @@ function auraForBuilding(b){
   function isMod(x,y){return modR.some(m=>pointInPoly([x,y],m));}
   function isBar(x,y){return barR.some(z=>pointInPoly([x,y],z));}
   
-  function freeBand(x,yb){
-    const ysR=[yb+LAP, yb+PH/2, yb+PH-LAP];
-    for(const y of ysR){ if(!onRoof(x,y)||isMod(x,y)) return false; }
-    return !isBar(x,yb+PH/2);
-  }
-
   // Wyszukaj krawędzie oznaczone jako "First" dla tego dachu, aby zachować 300mm odstępu
   const firstEdges = [];
   S.edgeCands.forEach(e => { if(S.assign[e.id]==='First' && nearestBuilding(e.m)===b.name) firstEdges.push([e.a, e.b]); });
   S.drawnEdges.forEach(e => { if(e.type==='First' && nearestBuilding(mid(e.a,e.b))===b.name) firstEdges.push([e.a, e.b]); });
 
-  function isTooCloseToFirst(cx, yb) {
-    if(!firstEdges.length) return false;
-    const [wx, wy] = inv([cx, yb + PH]); 
-    let minDist = 1e9;
-    for(const [a, b] of firstEdges) {
-      minDist = Math.min(minDist, ptSeg(wx, wy, a[0], a[1], b[0], b[1]));
+  function freeBand(x,yb){
+    const ysR=[yb+LAP, yb+PH/2, yb+PH-LAP];
+    for(const y of ysR){ if(!onRoof(x,y)||isMod(x,y)) return false; }
+    if(isBar(x,yb+PH/2)) return false;
+    
+    // Blokada odległości od kalenicy (First)
+    if(firstEdges.length){
+      const pt = inv([x, yb + PH]);
+      for(const [fa, fb] of firstEdges){
+        if(ptSeg(pt[0], pt[1], fa[0], fa[1], fb[0], fb[1]) < (0.30 * cosP)) return false;
+      }
     }
-    // Wizualna odległość 300mm na planie to 0.3 * cosP
-    return minDist < (0.30 * cosP);
+    return true;
   }
 
   const rowBottoms=[];
@@ -641,10 +654,6 @@ function auraForBuilding(b){
     let cx=a; let guard=0;
     while(bb-cx>=MINW && guard++<80){
       const w=bb-cx;
-      // Przerwij układanie w tej kolumnie, jeśli jesteśmy bliżej niż 300mm od kalenicy
-      if (isTooCloseToFirst(cx + Math.min(w, 2.77)/2, yb)) {
-        break; 
-      }
       
       let std=null;
       for(const s of [2.77,1.94,1.38]){ if(s<=w+0.06){ const rem=w-s; if(rem<=0.06||rem>=MINW){std=s;break;} } }
@@ -948,11 +957,6 @@ function compute(){
   rows.forEach(r=>{if(r.group)return;let t=B.reduce((a,n)=>a+(r.perB[n]||0),0);r.total=(r.unit==='lfm'||r.unit==='m²')?Math.round(t*10)/10:t;});
   S.result={rows,buildings:B,edges,aura};return S.result;
 }
-
-function r1(x){return Math.round(x*10)/10;}
-
-function analyzeGrid(b){
-  const tiles=[];
 
 function analyzeGrid(b){
   const tiles=[];
@@ -1672,6 +1676,12 @@ function setupCanvas(){
           const pW = 1.38;
           const pH = 0.78 * cosP; 
           
+          u.plates = u.plates.filter(p => {
+             const cx = p.x + p.w/2;
+             const cy = p.y + p.h/2;
+             return !(cx >= minX && cx <= maxX && cy >= minY && cy <= maxY);
+          });
+
           for(let py = minY; py + pH <= maxY + 0.1; py += pH) {
             for(let px = minX; px + pW <= maxX + 0.1; px += pW) {
               const width = (px + pW > maxX) ? (maxX - px) : pW;
