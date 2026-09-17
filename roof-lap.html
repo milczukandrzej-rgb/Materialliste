@@ -252,7 +252,6 @@
   <span>Stückzahlen prüfen · „Die Masse sind auf dem Bau zu kontrollieren"</span>
 </footer>
 
-<!-- Offline XLSX export is implemented below; no external scripts required. -->
 <script>
 /* ============================================================
    DXF PARSER  (minimal, tuned for PV*Sol / EliteCAD exports)
@@ -260,13 +259,10 @@
    ============================================================ */
 function parseDXF(text){
   const lines = text.split(/\r\n|\r|\n/);
-  // tokenize into (code,value) pairs
   const toks=[];
   for(let i=0;i<lines.length-1;i+=2){
     toks.push([parseInt(lines[i].trim(),10), lines[i+1]]);
   }
-  // Keep the drawing unit from the HEADER. It is only used as a fallback when
-  // no module geometry is available to infer the scale more reliably.
   let insUnits=null;
   for(let k=0;k<toks.length;k++){
     if(toks[k][0]===9&&String(toks[k][1]).trim()==='$INSUNITS'){
@@ -274,7 +270,6 @@ function parseDXF(text){
       break;
     }
   }
-  // split sections
   let i=0;
   const blocks={};         // name -> array of entities (in block coords)
   const entities=[];       // modelspace entities
@@ -286,11 +281,10 @@ function parseDXF(text){
       if(code===0){
         const type=val; i++;
         const ent={type,layer:'0',verts:[],dxf:{}};
-        // read until next 0
         while(i<toks.length && toks[i][0]!==0){
           const [c,v]=toks[i];
           if(c===8) ent.layer=v;
-          else if(c===2) ent.dxf.name=v;            // block name (INSERT)
+          else if(c===2) ent.dxf.name=v;            
           else if(c===10) ent.dxf.x=parseFloat(v);
           else if(c===20) ent.dxf.y=parseFloat(v);
           else if(c===41) ent.dxf.sx=parseFloat(v);
@@ -312,8 +306,6 @@ function parseDXF(text){
     }
     return out;
   }
-  // AutoCAD may write a closed shape either as LWPOLYLINE or as the older
-  // POLYLINE + VERTEX ... + SEQEND sequence. Convert both to one representation.
   function normalizeEntities(list){
     const out=[];
     for(let n=0;n<list.length;n++){
@@ -334,11 +326,9 @@ function parseDXF(text){
     return out;
   }
   function dist(a,b){return Math.hypot(b[0]-a[0],b[1]-a[1]);}
-  // walk sections
   while(i<toks.length){
     const [code,val]=toks[i];
     if(code===0 && val==='SECTION'){
-      // find section name (code 2)
       let sname='';
       let j=i+1;
       while(j<toks.length && toks[j][0]!==0){ if(toks[j][0]===2) sname=toks[j][1]; j++; }
@@ -350,7 +340,6 @@ function parseDXF(text){
             while(i<toks.length && toks[i][0]!==0){ if(toks[i][0]===2) bname=toks[i][1]; i++; }
             const ents=normalizeEntities(readEntities());
             blocks[bname]=ents;
-            // skip ENDBLK
             if(i<toks.length && toks[i][0]===0 && toks[i][1]==='ENDBLK') i++;
           } else i++;
         }
@@ -362,7 +351,6 @@ function parseDXF(text){
     }
     i++;
   }
-  // resolve INSERTs -> explode block geometry into world coords, keep INSERT's layer
   const resolved=[];
   function pushResolved(e, layerOverride){
     const lay = layerOverride||e.layer;
@@ -377,7 +365,6 @@ function parseDXF(text){
       const ox=e.dxf.x||0, oy=e.dxf.y||0, sx=e.dxf.sx||1, sy=e.dxf.sy||1, rot=(e.dxf.rot||0)*Math.PI/180;
       const cos=Math.cos(rot), sin=Math.sin(rot);
       for(const be of blocks[e.dxf.name]){
-        // Layer 0 inherits the INSERT layer; explicitly assigned layers stay intact.
         const childLayer=(!be.layer||be.layer==='0')?e.layer:be.layer;
         if(be.type==='LWPOLYLINE'){
           const vs=be.verts.map(([x,y])=>{
@@ -409,11 +396,11 @@ window.__parseDXF=parseDXF;
 const S = {
   raw:null, mods:[], carriers:[], barred:[], env:[], buildings:[], roofs:[],
   layers:{},
-  edgeCands:[],        // {id,a,b,len,interior,assigned:null|type}
-  assign:{},           // id -> type  (First/Traufe/Ort/Grat/Kehle)
-  assignSnow:{},       // id -> true  (Schneefang, zusätzlich zum Kantentyp möglich)
-  drawnEdges:[],       // free-drawn {a,b,len,type}
-  auraUser:null,       // Nutzer-Aura-Layout: {gebäude:{frame:{cc,ss},plates:[{x,y,w,h}]}}
+  edgeCands:[],        
+  assign:{},           
+  assignSnow:{},       
+  drawnEdges:[],       
+  auraUser:null,       
   params:{ h0:1000, neigung:12, ortVariante:'seitenanschluss', firstVariante:'standard', firstSeiten:2, auraGlobal:true, schneefang:false },
   activeBuilding:'ALL', activeTool:null, result:null
 };
@@ -436,7 +423,7 @@ function canonicalLayer(name){
   return known[key]||leaf;
 }
 
-/* ---- geometry ---- */
+/* ---- geometry & projection helper ---- */
 const H=(a,b)=>Math.hypot(b[0]-a[0],b[1]-a[1]);
 const mid=(a,b)=>[(a[0]+b[0])/2,(a[1]+b[1])/2];
 const ang=(a,b)=>(((Math.atan2(b[1]-a[1],b[0]-a[0])*180/Math.PI)%180)+180)%180;
@@ -446,15 +433,40 @@ function polyArea(v){let s=0;for(let i=0;i<v.length;i++){const[x1,y1]=v[i],[x2,y
 function pointInPoly(pt,poly){let c=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const xi=poly[i][0],yi=poly[i][1],xj=poly[j][0],yj=poly[j][1];if(((yi>pt[1])!==(yj>pt[1]))&&(pt[0]<(xj-xi)*(pt[1]-yi)/(yj-yi)+xi))c=!c;}return c;}
 function polyLen(v){let s=0;for(let i=0;i<v.length-1;i++)s+=H(v[i],v[i+1]);return s;}
 
-/* DXF $INSUNITS is frequently missing or wrong. Prefer module/Aura geometry;
-   use the HEADER unit only when neither provides a known physical size. */
+// Oblicza czynnik rzutowania z DXF (cosinus nachylenia), aby skompensować wymiary
+function getPitchFactor(bname) {
+  const isProjected = !(S.roofs && S.roofs.length);
+  if (!isProjected) return 1;
+  const pitch = S.params.neigung || 0;
+  return Math.cos(pitch * Math.PI / 180) || 1;
+}
+
+// Oblicza rzeczywistą długość krawędzi (odkompensowując uciętą oś spadu)
+function trueLength(bname, ptA, ptB) {
+  const b = S.buildings.find(x => x.name === bname);
+  const isProjected = !(S.roofs && S.roofs.length);
+  if (!isProjected || !b) return H(ptA, ptB);
+  
+  const cosP = getPitchFactor(bname);
+  const { cc, ss } = buildingFrame(b);
+  
+  const lxA = ptA[0] * cc - ptA[1] * ss;
+  const lyA = ptA[0] * ss + ptA[1] * cc;
+  const lxB = ptB[0] * cc - ptB[1] * ss;
+  const lyB = ptB[0] * ss + ptB[1] * cc;
+  
+  const dyTrue = (lyB - lyA) / cosP; // rozciągamy oś spadu dachu z powrotem do 100%
+  const dxTrue = lxB - lxA;
+  
+  return Math.hypot(dxTrue, dyTrue);
+}
+
 function normalizeScale(resolved,insUnits=null){
   const moduleLens=(resolved||[]).filter(e=>canonicalLayer(e.layer)==='MODULES'&&e.verts&&e.verts.length>=4)
     .map(e=>longEdge(e.verts).len).filter(Number.isFinite).sort((a,b)=>a-b);
   const auraLens=moduleLens.length?[]:(resolved||[]).filter(e=>canonicalLayer(e.layer)==='AURA'&&e.verts&&e.verts.length>=4)
     .map(e=>longEdge(e.verts).len).filter(Number.isFinite).sort((a,b)=>a-b);
   const lens=moduleLens.length?moduleLens:auraLens;
-  // AutoCAD unit codes: 4=millimetres, 5=centimetres, 6=metres.
   const unitFactor=({4:1000,5:100,6:1})[insUnits]||1;
   let factor=1,median=null;
   if(lens.length){
@@ -466,13 +478,9 @@ function normalizeScale(resolved,insUnits=null){
   return {resolved:(resolved||[]).map(e=>({...e,verts:e.verts?e.verts.map(([x,y])=>[x/factor,y/factor]):e.verts})),factor,median};
 }
 
-/* ---- classify module type by long edge ---- */
 function classifyModule(v){const {len}=longEdge(v);let best=null,bd=1e9;for(const f of FMT){const d=Math.abs(len-f.mm/1000);if(d<bd){bd=d;best=f;}}return best?best.t:'L';}
 
-/* ---- cluster modules into buildings ---- */
 function clusterBuildings(mods){
-  // Never merge geometry from separately imported files, even when their
-  // coordinates or proximity would make the spatial clustering overlap.
   const projectKeys=[...new Set(mods.map(m=>m.projectId==null?'legacy':String(m.projectId)))];
   if(projectKeys.length>1){
     const all=[];
@@ -500,7 +508,6 @@ function clusterBuildings(mods){
   return blds;
 }
 
-/* ---- AURA: full roof remainder (carrier union - modules - barred), in plate raster ---- */
 function rasterUnion(polys,x0,y0,res,W,Hh){
   const g=new Uint8Array(W*Hh),idx=(x,y)=>y*W+x;
   polys.forEach(v=>{
@@ -512,41 +519,28 @@ function rasterUnion(polys,x0,y0,res,W,Hh){
   });
   return g;
 }
-/* Offcut optimisation: turn the "verbaut" plate breakdown (full plates 1380/1940/2770
-   plus narrow cut pieces) into an ORDER list. A bought full plate of width FW, installed
-   at width <FW, leaves an offcut FW-used-kerf; if that offcut >=400mm and >= a needed cut
-   piece, the piece comes from the offcut (no extra plate bought). Greedy: sort cut pieces
-   desc, try to source each from the offcut of an already-counted full plate; else buy the
-   smallest standard plate that yields it. Returns {order:{1380,1940,2770}, total}. */
+
 function optimizeAura(byWidth, cutWidths){
   const STD=[1380,1940,2770], KERF=10, MINW=400;
   const order={1380:byWidth[1380]||0,1940:byWidth[1940]||0,2770:byWidth[2770]||0};
-  // offcuts available from the full plates we already order. A 2770 used full leaves ~0;
-  // but cut pieces typically come from buying a STD plate sized for the piece. Model offcut
-  // pool from the *narrow* pieces themselves: pack pieces into the fewest standard plates.
   const pieces=[...(cutWidths||[])].filter(w=>w>=MINW).sort((a,b)=>b-a);
-  // bin-pack pieces into standard-width plates (each plate length = a standard width),
-  // choosing the smallest standard that fits remaining pieces to minimise waste.
-  const bins=[]; // each bin = {cap, rem}
+  const bins=[]; 
   pieces.forEach(pw=>{
     let bin=bins.find(bn=>bn.rem>=pw+ (bn.used? KERF:0));
     if(!bin){ const cap=STD.find(s=>s>=pw)||2770; bin={cap,rem:cap,used:0,std:cap}; bins.push(bin); }
     bin.rem-=pw+(bin.used?KERF:0); bin.used++;
   });
-  // add the bins (extra standard plates needed to supply the cut pieces) to the order
   bins.forEach(bn=>{ order[bn.std]=(order[bn.std]||0)+1; });
   const total=order[1380]+order[1940]+order[2770];
   return {order, total, binsUsed:bins.length};
 }
+
 function auraForBuilding(b){
-  // SPT DWG: aura plates are pre-placed with explicit widths -> count them directly, grouped by width
   if(S.sptAura && S.sptAura.length){
     const plates=S.sptAura.filter(p=>nearestBuilding(centroid(p.verts))===b.name);
     if(plates.length){
       const byW={};
       let m2=0; const plateRects=[];
-      // frame + framePlates auch hier liefern, damit der Aura-Editor SPT-Platten
-      // übernehmen kann (sonst verschwinden sie beim Einfrieren des Layouts)
       const frame=buildingFrame(b);
       const framePlates=[];
       plates.forEach(p=>{
@@ -564,71 +558,75 @@ function auraForBuilding(b){
       return {m2:Math.round(m2*10)/10, plates:plates.length, byWidth:byW, plateRects, frame, framePlates,
         pieces:plates.map(p=>({w:p.widthMM/1000,h:(p.heightMM||870)/1000}))};
     }
-    // No SPT Aura belongs to this building: continue with automatic filling.
   }
-  // PV*Sol / fallback: fill remaining roof area ROW BY ROW with the 3 Aura widths
-  // (2770/1940/1380, largest first, remainder cut to >=400mm). Also counts vertical
-  // joints between aura plates (and aura<->module) = Fugenprofile in the aura region.
+
   const carr=S.carriers.filter(c=>polyArea(c)>3).filter(c=>nearestBuilding(centroid(c))===b.name);
   if(carr.length===0) return {m2:0,plates:0,byWidth:{},auraFugen:0};
   const barred=S.barred.filter(c=>nearestBuilding(centroid(c))===b.name);
   const mods=b.mods.map(m=>m.v);
-  // orient to fall-line: rotate so module long edge is horizontal
+  
   const angs=b.mods.map(m=>((longEdge(m.v).ang%Math.PI)+Math.PI)%Math.PI);angs.sort((a,b)=>a-b);
   const dom=angs.length?angs[Math.floor(angs.length/2)]:0;const cc=Math.cos(-dom),ss=Math.sin(-dom);
   const rot=([x,y])=>[x*cc-y*ss, x*ss+y*cc];
   const rotPoly=v=>v.map(rot);
   const carrR=carr.map(rotPoly), modR=mods.map(rotPoly), barR=barred.map(rotPoly);
-  // bbox in rotated frame
+  
   let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;carrR.forEach(v=>v.forEach(([x,y])=>{x0=Math.min(x0,x);y0=Math.min(y0,y);x1=Math.max(x1,x);y1=Math.max(y1,y);}));
   
-  // ZMIANA: Wysokość aury na 780 mm (0.78 metra)
-  const ROW=0.78, PH=0.78, MINW=0.40, GAP=0.01;
+  // Kompensacja nachylenia dla DXF z PV*SOL. Rzeczywista wysokość Aury to 780mm. 
+  // Na rzucie 2D skraca się ona do 780mm * cos(pitch).
+  const cosP = getPitchFactor(b.name);
+  const TRUE_PH = 0.78; 
+  const ROW = TRUE_PH * cosP, PH = TRUE_PH * cosP, MINW = 0.40, GAP = 0.01;
   const WIDTHS=[2.77,1.94,1.38];
-  // (a) accurate remaining area via raster (modules + barred subtracted)
+  
   let rx0=1e9,ry0=1e9,rx1=-1e9,ry1=-1e9;carrR.forEach(v=>v.forEach(([x,y])=>{rx0=Math.min(rx0,x);ry0=Math.min(ry0,y);rx1=Math.max(rx1,x);ry1=Math.max(ry1,y);}));
   const res=25,RW=Math.ceil((rx1-rx0)*res)+2,RH=Math.ceil((ry1-ry0)*res)+2;
-  let m2=0;
+  let m2_projected=0;
   if(RW*RH<=6e6){
     const roofR=rasterUnion(carrR,rx0,ry0,res,RW,RH);
     const rmodR=rasterUnion(modR,rx0,ry0,res,RW,RH);
     const rbarR=rasterUnion(barR,rx0,ry0,res,RW,RH);
     let cells=0;for(let i=0;i<roofR.length;i++)if(roofR[i]&&!rmodR[i]&&!rbarR[i])cells++;
-    m2=cells/(res*res);
+    m2_projected=cells/(res*res);
   }
-  // (b) plate counts + fugen. PV*Sol aligns Aura plate boundaries to the MODULE COLUMN
-  //     raster (a 1380 plate sits under a 1380 module column, 1940 under 1940), rather than
-  //     "largest plate first". So we collect the vertical module edges and snap plate joints
-  //     to them. Within a free run we cut at every module-column edge that falls inside it,
-  //     then fill each sub-segment with the standard plate matching its width (remainder cut,
-  //     >=400mm). Fuge = vertical joint between two filled tiles; the open roof edge (Ort) is
-  //     a Seitenanschlussprofil, not a Fuge.
+  const m2 = m2_projected / cosP; // Obliczamy prawdziwe metry kwadratowe odkompensowując nachylenie
+
   const STEP=0.02, EDGE=0.12, SNAP=0.08, LAP=0.10;
   let plates=0, fug=0; const byWidth={1380:0,1940:0,2770:0,cut:0}; const cutWidths=[];
-  const inv=([x,y])=>[x*cc+y*ss, -x*ss+y*cc]; // rotated frame -> world
-  const plateRects=[]; // {verts:[world...], w, kind}
+  const inv=([x,y])=>[x*cc+y*ss, -x*ss+y*cc]; 
+  const plateRects=[]; 
   function onRoof(x,y){return carrR.some(c=>pointInPoly([x,y],c));}
   function isMod(x,y){return modR.some(m=>pointInPoly([x,y],m));}
   function isBar(x,y){return barR.some(z=>pointInPoly([x,y],z));}
-  // frei über die GANZE Plattenhöhe: Dachkante/Module strikt (LAP = konstruktive
-  // 90-mm-Überdeckung) — nichts ragt über die Dachkante oder in Module. Störflächen
-  // blockieren nur die eigene Zeile (Mittellinie): ober-/unterhalb sitzen volle
-  // Platten, die vor Ort um die Störfläche herum zugeschnitten werden.
+  
   function freeBand(x,yb){
     const ysR=[yb+LAP, yb+PH/2, yb+PH-LAP];
     for(const y of ysR){ if(!onRoof(x,y)||isMod(x,y)) return false; }
     return !isBar(x,yb+PH/2);
   }
 
-  // --- module raster anchors (rotated frame) ---
-  // horizontal row band bottoms (module bottom y), deduped to ROW pitch
+  // Wyszukaj krawędzie oznaczone jako "First" dla tego dachu, aby zachować 300mm odstępu
+  const firstEdges = [];
+  S.edgeCands.forEach(e => { if(S.assign[e.id]==='First' && nearestBuilding(e.m)===b.name) firstEdges.push([e.a, e.b]); });
+  S.drawnEdges.forEach(e => { if(e.type==='First' && nearestBuilding(mid(e.a,e.b))===b.name) firstEdges.push([e.a, e.b]); });
+
+  function isTooCloseToFirst(cx, yb) {
+    if(!firstEdges.length) return false;
+    const [wx, wy] = inv([cx, yb + PH]); 
+    let minDist = 1e9;
+    for(const [a, b] of firstEdges) {
+      minDist = Math.min(minDist, ptSeg(wx, wy, a[0], a[1], b[0], b[1]));
+    }
+    // Wizualna odległość 300mm na planie to 0.3 * cosP
+    return minDist < (0.30 * cosP);
+  }
+
   const rowBottoms=[];
   modR.forEach(m=>{let mny=1e9;m.forEach(([,y])=>{mny=Math.min(mny,y);});rowBottoms.push(mny);});
   rowBottoms.sort((a,b)=>a-b);
   const rowAnchors=[];rowBottoms.forEach(y=>{if(!rowAnchors.length||Math.abs(y-rowAnchors[rowAnchors.length-1])>0.30)rowAnchors.push(y);});
-  // Build a full row grid aligned to the real module-row pitch. Preserve the
-  // module-band coverage and extend it into usable roof above the modules,
-  // while keeping the final 300 mm below the ridge free for First plates.
+  
   let modTop=-1e9;modR.forEach(m=>m.forEach(([,y])=>{modTop=Math.max(modTop,y);}));
   if(modTop===-1e9)modTop=y0;
   const anchor=rowAnchors.length?rowAnchors[0]:y0;
@@ -638,16 +636,16 @@ function auraForBuilding(b){
   for(let y=anchor; y>=y0-ROW; y-=ROW) rowYs.unshift(y);
   for(let y=anchor+ROW; y<=lastBottom; y+=ROW) rowYs.push(y);
 
-  const framePlates=[]; // {x,y,w,h} im Rotationsrahmen — Basis für den Aura-Editor
-  // Intelligente Auffüllung: Standardbreiten zuerst (grösste zuerst, Stösse folgen dem
-  // Modulraster, weil Runs an Modul-/Störflächenkanten beginnen/enden). Bliebe ein Rest
-  // <400 mm, wird stattdessen EIN Zuschnitt über die ganze Restbreite gesetzt — Lücken
-  // bleiben nur, wo weniger als 400 mm Platz ist. Die Bestellung (orderAuraPieces)
-  // schneidet Zuschnitte aus möglichst wenigen Rohlingen (Abschnitt-Wiederverwendung).
+  const framePlates=[]; 
   function fillRun(a,bb,yb,nRef){
     let cx=a; let guard=0;
     while(bb-cx>=MINW && guard++<80){
       const w=bb-cx;
+      // Przerwij układanie w tej kolumnie, jeśli jesteśmy bliżej niż 300mm od kalenicy
+      if (isTooCloseToFirst(cx + Math.min(w, 2.77)/2, yb)) {
+        break; 
+      }
+      
       let std=null;
       for(const s of [2.77,1.94,1.38]){ if(s<=w+0.06){ const rem=w-s; if(rem<=0.06||rem>=MINW){std=s;break;} } }
       if(std!=null){
@@ -667,8 +665,7 @@ function auraForBuilding(b){
   }
   rowYs.forEach(yb=>{
     const yc=yb+PH/2;
-    if(yb+PH > layoutTop+0.02) return; // reserve the 300 mm First strip
-    // free runs over the full plate band of this row
+    if(yb+PH > layoutTop+0.02) return; 
     const runs=[]; let cur=null;
     for(let x=x0; x<=x1; x+=STEP){
       if(freeBand(x,yb)){ if(!cur)cur=[x,x]; else cur[1]=x; }
@@ -689,7 +686,6 @@ function auraForBuilding(b){
   return {m2:Math.round(m2*10)/10, plates, byWidth, auraFugen:fug, plateRects, cutWidths, frame:{cc,ss}, framePlates, pieces:framePlates};
 }
 
-/* ---- Aura: Nutzer-Layout (Editor / „Aura"-Layer-Import) ---- */
 function buildingFrame(b){
   let source=b.mods.map(m=>m.v);
   if(!source.length){
@@ -700,13 +696,12 @@ function buildingFrame(b){
   const dom=angs.length?angs[Math.floor(angs.length/2)]:0;
   return {cc:Math.cos(-dom), ss:Math.sin(-dom)};
 }
-// Zählt die vom Anwender platzierten/verschobenen Platten (S.auraUser) statt des
-// Auto-Layouts. Breite -> nächste Standardbreite (±60 mm), sonst Zuschnitt.
 function auraFromUser(b){
   const u=S.auraUser && S.auraUser[b.name];
   if(!u) return null;
   const {cc,ss}=u.frame;
   const inv=([x,y])=>[x*cc+y*ss, -x*ss+y*cc];
+  const cosP = getPitchFactor(b.name);
   const byWidth={1380:0,1940:0,2770:0,cut:0}; const cutWidths=[]; const plateRects=[];
   let m2=0, fug=0;
   u.plates.forEach(p=>{
@@ -715,10 +710,10 @@ function auraFromUser(b){
     let kind;
     if(std){ const k=std===2.77?2770:std===1.94?1940:1380; byWidth[k]++; kind=String(k); }
     else { byWidth.cut++; cutWidths.push(wmm); kind='cut'; }
-    m2+=p.w*p.h;
+    // m2 kompensowane o spadek, aby liczyło poprawne rzeczywiste zapotrzebowanie
+    m2 += p.w * (p.h / cosP);
     plateRects.push({verts:[[p.x,p.y],[p.x+p.w,p.y],[p.x+p.w,p.y+p.h],[p.x,p.y+p.h]].map(inv), w:wmm, kind});
   });
-  // Fugen: Platten-Nachbarn in gleicher Zeile mit kleiner Fuge + Modul-Nachbarschaft
   const mods=b.mods.map(m=>m.v);
   const isModW=pt=>mods.some(mv=>pointInPoly(pt,mv));
   u.plates.forEach((p,i)=>{
@@ -731,12 +726,6 @@ function auraFromUser(b){
   return {m2:Math.round(m2*10)/10, plates:u.plates.length, byWidth, auraFugen:fug, plateRects, cutWidths, frame:u.frame, framePlates:u.plates, pieces:u.plates, user:true};
 }
 
-/* ---- Bestellung: verbaute Teilstücke -> möglichst wenige Rohlinge ----
-   - Standardbreite, volle Höhe: 1 Rohling je Stück.
-   - Zuschnittbreiten (volle Höhe): nebeneinander aus einem Rohling schneiden
-     (Bin-Packing, 10 mm Sägefuge) — Abschnitte werden wiederverwendet.
-   - Höhenreduzierte Stücke (<=440 mm): zwei übereinander aus einem Rohling
-     gleicher Breitenklasse. Aufsteckprofil/Auflager zählen trotzdem JE Teilstück. */
 function orderAuraPieces(pieces){
   const order={1380:0,1940:0,2770:0}; let reuse=0; const KERF=0.01;
   const STD=[1.38,1.94,2.77];
@@ -758,17 +747,14 @@ function orderAuraPieces(pieces){
   return {order,reuse};
 }
 
-/* ---- edge candidates from carrier planes ---- */
 function buildEdgeCandidates(){
   const big=S.carriers.filter(c=>polyArea(c)>5);
   let edges=[];
   big.forEach((v,pi)=>{for(let i=0;i<v.length-1;i++){const L=H(v[i],v[i+1]);if(L>0.5)edges.push({pi,a:v[i],b:v[i+1],L,m:mid(v[i],v[i+1]),an:ang(v[i],v[i+1])});}});
   edges.forEach(e=>{e.interior=edges.some(o=>o!==e&&o.pi!==e.pi&&H(e.m,o.m)<0.6&&Math.abs(((e.an-o.an+90)%180)-90)<12);});
-  // dedupe by midpoint
   const seen=new Set(),out=[];
   edges.forEach(e=>{const k=e.m[0].toFixed(1)+','+e.m[1].toFixed(1);if(seen.has(k))return;seen.add(k);out.push(e);});
   S.edgeCands=out.map((e,i)=>({id:i,pi:e.pi,a:e.a,b:e.b,len:e.L,interior:e.interior,m:e.m,an:e.an}));
-  // preset from existing edge layers if present
   const layerMap={First:'First',Seitenanschlussprofil:'Ort',Grat:'Grat',Kehle:'Kehle',Schneefang:'Schneefang'};
   S.preset=[];
   Object.entries(layerMap).forEach(([lay,type])=>{
@@ -777,9 +763,7 @@ function buildEdgeCandidates(){
     });
   });
 }
-/* PV*Sol has no explicit snow-guard objects. Preset the lowest carrier edge
-   parallel to the dominant module axis on each roof face. Manual snow marking
-   still overrides these presets through the normal per-type override logic. */
+
 function presetSchneefangEaves(){
   if((S.sptSnow&&S.sptSnow.length)||(S.roofs&&S.roofs.length)||!S.mods.length)return;
   if(S.preset&&S.preset.some(p=>p.type==='Schneefang'))return;
@@ -792,62 +776,58 @@ function presetSchneefangEaves(){
   });
   Object.values(byFace).forEach(list=>{const lo=Math.min(...list.map(x=>x.p));list.filter(x=>x.p<=lo+0.15).forEach(x=>S.preset.push({a:x.e.a,b:x.e.b,len:x.e.len,type:'Schneefang',autoEave:true}));});
 }
+
 function nearestBuilding(pt){let best=null,bd=1e18;for(const b of S.buildings){const d=(pt[0]-b.cx)**2+(pt[1]-b.cy)**2;if(d<bd){bd=d;best=b;}}return best?best.name:'H1';}
 
-/* ---- collect assigned edge lengths per building per type ---- */
-// edge types the user has marked manually (click or free-draw) — auto data of
-// the SAME type is then suppressed, other types keep their automatic values
 function userOverrideTypes(){
   const set=new Set(Object.values(S.assign));
   S.drawnEdges.forEach(e=>set.add(e.type));
   if(Object.keys(S.assignSnow||{}).length)set.add('Schneefang');
   return set;
 }
+
 function edgeLengthsByBuilding(){
   const out={};S.buildings.forEach(b=>out[b.name]={First:0,Traufe:0,Ort:0,Grat:0,Kehle:0,Schneefang:0,firstLines:[]});
-  function add(a,b,len,type){const nm=nearestBuilding(mid(a,b));out[nm][type]+=len;if(type==='First')out[nm].firstLines.push(len);}
-  // assigned candidates
+  
+  function add(a,b,len,type){
+    const nm=nearestBuilding(mid(a,b));
+    // Przelicza długość z uwzględnieniem kąta dachu (prawdziwa dł. w metrach)
+    const tLen = trueLength(nm, a, b);
+    out[nm][type]+=tLen;
+    if(type==='First')out[nm].firstLines.push(tLen);
+  }
+  
   S.edgeCands.forEach(e=>{const t=S.assign[e.id];if(t)add(e.a,e.b,e.len,t);});
-  // Schneefang overlay (unabhängig vom Kantentyp, z. B. zusätzlich zu Traufe)
   S.edgeCands.forEach(e=>{if(S.assignSnow[e.id])add(e.a,e.b,e.len,'Schneefang');});
-  // free-drawn
   S.drawnEdges.forEach(e=>add(e.a,e.b,e.len,e.type));
   const over=userOverrideTypes();
-  // DXF-Layer-Vorbelegung (PV*Sol): PRO TYP nutzen, bis der Typ manuell markiert wird
   if(S.preset && S.preset.length){
     S.preset.forEach(p=>{ if(!over.has(p.type)) add(p.a,p.b,p.len,p.type); });
   }
-  // auto Schneefang from SPT snow-guard markers (DWG), unless user marked Schneefang manually
   if(!over.has('Schneefang') && S.sptSnow && S.sptSnow.length){
     S.sptSnow.forEach(seg=>{ if(seg&&seg.length>=2){ const len=H(seg[0],seg[1]); if(len>0.05) add(seg[0],seg[1],len,'Schneefang'); } });
   }
-  // auto First from SPT roof ridge lines (DWG): add unless user already marked First on that face
   if(S.roofs && S.roofs.length && !over.has('First')){
     S.roofs.forEach(r=>{ if(r.ridge && !r.firstOff){ const len=H(r.ridge[0],r.ridge[1]); add(r.ridge[0],r.ridge[1],len,'First'); } });
   }
   return out;
 }
 
-/* ---- rule helpers ---- */
 function modulHalter(t,h0){if(h0<=1400)return t==='XL'?4:3;if(h0<=1600)return t==='M'?3:5;return t==='M'?4:5;}
 function auraAllowed(h0){return h0<=1400;}
 function plattenauflager(b,h0){if(h0<=1000){if(b>=2770)return{bef:6,auf:11};if(b>=1940)return{bef:4,auf:7};return{bef:3,auf:5};}if(b>=1940)return{bef:4,auf:10};return{bef:3,auf:7};}
 
-/* ---- RULE ENGINE ---- */
 function compute(){
   const p=S.params, rows=[], B=S.buildings.map(b=>b.name);
   const blank=()=>{const o={};B.forEach(n=>o[n]=0);return o;};
-  // row(pos, name, opts) where opts={art, dim, unit, pack}
   const row=(pos,name,opts)=>{opts=opts||{};const r={pos,art:name,artNr:opts.art||'',dim:opts.dim||'',unit:opts.unit||'Stk',pack:opts.pack||'',perB:blank()};rows.push(r);return r;};
   const group=t=>rows.push({group:t});
   const edges=edgeLengthsByBuilding();
-  const fseiten=(p.firstSeiten===1)?1:2; // 1 or 2 roof sides for First
+  const fseiten=(p.firstSeiten===1)?1:2;
 
-  // fugen from raster
   const grid={};S.buildings.forEach(b=>grid[b.name]=analyzeGrid(b));
-  // aura per building (Nutzer-Layout aus Editor/Import hat Vorrang vor der Automatik)
   const aura={};S.buildings.forEach(b=>{aura[b.name]=(p.auraGlobal&&auraAllowed(p.h0))?(auraFromUser(b)||auraForBuilding(b)):{m2:0,plates:0};});
-  // collect aura plate rectangles (for graphical layout check) + raw remaining area for validation
+  
   S.auraRects=[]; S.auraValidation={};
   S.buildings.forEach(b=>{ const a=aura[b.name]; if(a.plateRects) S.auraRects.push(...a.plateRects);
     S.auraValidation[b.name]={plateArea:0, rawRemain:a.m2||0}; });
@@ -871,11 +851,9 @@ function compute(){
     const sap=p.ortVariante==='seitenanschluss'?Math.ceil(ort/0.87):0;
     const sapL=Math.ceil(sap/2), sapR=sap-sapL;
     rSL.perB[b.name]=sapL;rSR.perB[b.name]=sapR;
-    // Schrauben Modulhalter (2/Halter) + Fugen-/Seitenanschluss-Schrauben gehen in separate T20-Zeile
     rHS.perB[b.name]=h*2;
   });
 
-  // First components (Firstanschlussblech etc.) — adaptive 2770/1940, ×Dachseiten
   group('Firstausbildung');
   const rFAB27=row('','Sunskin Roof Lap Firstanschlussblech gelocht',{art:'8087567',dim:'2770×289 mm',unit:'Stk'});
   const rFAB19=row('','Sunskin Roof Lap Firstanschlussblech gelocht',{art:'8087566',dim:'1940×289 mm',unit:'Stk'});
@@ -889,13 +867,12 @@ function compute(){
     let n27=0,n19=0,joints=0;
     edges[b.name].firstLines.forEach(L=>{const t=tileFirst(L);n27+=t.n27;n19+=t.n19;joints+=Math.max(t.n27+t.n19-1,0);});
     rFAB27.perB[b.name]=n27*fseiten; rFAB19.perB[b.name]=n19*fseiten;
-    rFPr27.perB[b.name]=n27;         rFPr19.perB[b.name]=n19; // Firstprofil sitzt mittig, 1× pro Segment
-    rFN.perB[b.name]=n27+n19;        // 1 Niete pro Firstprofil
+    rFPr27.perB[b.name]=n27;         rFPr19.perB[b.name]=n19;
+    rFN.perB[b.name]=n27+n19;        
     rFFB.perB[b.name]=joints*fseiten; rFFBl.perB[b.name]=joints;
   });
 
   group('Faserzement + Zubehör');
-  // Aura plates — order list (Verschnitt optimiert) with article numbers
   const rO27=row('','Aura 2 Ergänzungsplatte Solar 2770×870×8',{art:'8087693',dim:'2770×870 mm',unit:'Stk'});
   const rO19=row('','Aura 2 Ergänzungsplatte Solar 1940×870×8',{art:'8087756',dim:'1940×870 mm',unit:'Stk'});
   const rO13=row('','Aura 2 Ergänzungsplatte Solar 1380×870×8',{art:'8087631',dim:'1380×870 mm',unit:'Stk'});
@@ -905,40 +882,33 @@ function compute(){
   const rAU=row('','Sunskin Roof Lap Plattenauflager Kunststoff',{art:'8054301',dim:'118×60×31 mm',unit:'Stk',pack:'10er'});
   const rAH=row('','Holzschraube T30 Stahl A2 m. Dichtelement',{art:'8088890',dim:'6,5×65 mm',unit:'Stk',pack:'100er'});
   const rT20=row('','Holzschraube T20 für Fugenprofil Stahl A2',{art:'8001608',dim:'4,8×30 mm',unit:'Stk',pack:'250er'});
-  // verbaut detail (informativ)
   const rVerb=row('','— Aura verbaut inkl. Randzuschnitte (informativ)',{dim:'',unit:'Stk'});
   const rReu=row('','— davon aus Abschnitten gedeckt (informativ)',{dim:'',unit:'Stk'});
   const rVm=row('','— Restfläche Aura',{dim:'',unit:'m²'});
   S.buildings.forEach(b=>{
     const a=aura[b.name];
-    // First plates: adaptive 2770/1940 ×Dachseiten
     let n27=0,n19=0;edges[b.name].firstLines.forEach(L=>{const t=tileFirst(L);n27+=t.n27;n19+=t.n19;});
     rFP27.perB[b.name]=n27*fseiten; rFP19p.perB[b.name]=n19*fseiten;
     if(a.pieces && a.pieces.length){
-      // Bestellung aus Teilstücken: Zuschnitte werden aus möglichst wenigen Rohlingen
-      // geschnitten (Abschnitt-Wiederverwendung, inkl. Höhenteilung <=440 mm)
       const opt=orderAuraPieces(a.pieces);
       rO27.perB[b.name]=opt.order[2770]; rO19.perB[b.name]=opt.order[1940]; rO13.perB[b.name]=opt.order[1380];
       rVerb.perB[b.name]=a.plates; rReu.perB[b.name]=opt.reuse; rVm.perB[b.name]=a.m2;
-      // Zubehör JE verbautem Teilstück (auch wenn 2 Stücke aus 1 Rohling kommen)
-      rAP.perB[b.name]=a.plates; // 1 Aufsteckprofil je Teilstück
+      rAP.perB[b.name]=a.plates;
       let auf=0,bef=0;a.pieces.forEach(pc=>{const pa=plattenauflager(Math.round(pc.w*1000),p.h0);auf+=pa.auf;bef+=pa.bef;});
       rAU.perB[b.name]=auf;rAH.perB[b.name]=bef;
     } else if(a.byWidth){
       const opt=optimizeAura(a.byWidth, a.cutWidths||[]);
       rO27.perB[b.name]=opt.order[2770]; rO19.perB[b.name]=opt.order[1940]; rO13.perB[b.name]=opt.order[1380];
       rVerb.perB[b.name]=a.plates; rVm.perB[b.name]=a.m2;
-      rAP.perB[b.name]=a.plates; // 1 Aufsteckprofil je verbaute Platte
+      rAP.perB[b.name]=a.plates;
       let auf=0,bef=0;Object.entries(a.byWidth).forEach(([w,n])=>{const ww=(w==='cut')?1380:+w;if(isNaN(ww))return;const pa=plattenauflager(ww,p.h0);auf+=pa.auf*n;bef+=pa.bef*n;});
       rAU.perB[b.name]=auf;rAH.perB[b.name]=bef;
     } else {
       rO13.perB[b.name]=a.plates;rVerb.perB[b.name]=a.plates;rVm.perB[b.name]=a.m2;rAP.perB[b.name]=a.plates;
       const pa=plattenauflager(1380,p.h0);rAU.perB[b.name]=a.plates*pa.auf;rAH.perB[b.name]=a.plates*pa.bef;
     }
-    // T20-Schrauben: Fugenprofil (2/Stk) + Seitenanschluss (2/Stk)
     const sap=rSL.perB[b.name]+rSR.perB[b.name];
     rT20.perB[b.name]=(rF.perB[b.name]+sap)*2;
-    // First plate screws use T30 too: 6 per first plate, add to rAH
     rAH.perB[b.name]+=(n27+n19)*fseiten*6;
   });
 
@@ -978,25 +948,20 @@ function compute(){
   rows.forEach(r=>{if(r.group)return;let t=B.reduce((a,n)=>a+(r.perB[n]||0),0);r.total=(r.unit==='lfm'||r.unit==='m²')?Math.round(t*10)/10:t;});
   S.result={rows,buildings:B,edges,aura};return S.result;
 }
-function r1(x){return Math.round(x*10)/10;}
 
 function analyzeGrid(b){
-  // Tiles = modules + (for DWG) the real SPT aura plates that belong to this building.
-  // Fugenprofil sits in EVERY vertical joint between horizontally adjacent tiles,
-  // regardless of whether the neighbour is a module or an Aura plate (doc p.21).
   const tiles=[];
   b.mods.forEach(m=>tiles.push({v:m.v}));
-  // add SPT aura plates near this building (DWG only; sptAura empty for DXF)
   (S.sptAura||[]).forEach(p=>{ if(nearestBuilding(centroid(p.verts))===b.name) tiles.push({v:p.verts}); });
   if(!tiles.length) return {fugenProfile:0,ncol:0,nrow:0};
-  // dominant long-edge angle from MODULES (stable orientation) -> rotate long edge horizontal
   const angs=b.mods.map(m=>{const a=longEdge(m.v).ang;return ((a%Math.PI)+Math.PI)%Math.PI;});angs.sort((x,y)=>x-y);
   const dom=angs.length?angs[Math.floor(angs.length/2)]:0;const c=Math.cos(-dom),s=Math.sin(-dom);
-  const ROW=0.78;
+  const cosP = getPitchFactor(b.name);
+  const ROW=0.78 * cosP;
   const T=tiles.map(t=>{
     const[px,py]=centroid(t.v);
     const lx=px*c-py*s, ly=px*s+py*c;
-    const w=longEdge(t.v).len; // long edge = horizontal extent
+    const w=longEdge(t.v).len; 
     return {x:lx, y:ly, w};
   });
   let miny=1e9;T.forEach(t=>miny=Math.min(miny,t.y));
@@ -1008,7 +973,7 @@ function analyzeGrid(b){
     ncol=Math.max(ncol,row.length);
     for(let i=0;i<row.length-1;i++){
       const gap=(row[i+1].x-row[i+1].w/2)-(row[i].x+row[i].w/2);
-      if(Math.abs(gap)<0.25) fug++; // shared vertical joint (module|module, module|aura, aura|aura)
+      if(Math.abs(gap)<0.25) fug++; 
     }
   });
   return {fugenProfile:fug, ncol, nrow:Object.keys(rows).length};
@@ -1031,7 +996,6 @@ function closedLayerPolys(entities){
   return polys;
 }
 
-/* ---- parse entry ---- */
 function onParsed(resolved){
   resolved=normalizeScale(resolved,resolved&&resolved.insUnits).resolved.map(e=>({...e,layer:canonicalLayer(e.layer)}));
   S.raw=resolved;const byL={};resolved.forEach(e=>{(byL[e.layer]=byL[e.layer]||[]).push(e);});S.layers=byL;
@@ -1039,17 +1003,15 @@ function onParsed(resolved){
   S.mods=modP.map(e=>({v:e.verts,type:e.modType||classifyModule(e.verts),projectId:e.projectId,projectName:e.projectName}));
   S.carriers=(byL['MODULECARRIERS']||[]).filter(e=>e.verts.length>=3).map(e=>e.verts);
   S.barred=(byL['BARREDAREAS']||[]).filter(e=>e.verts.length>=4).map(e=>e.verts);
-  // PV*Sol exports the roof outline + cut-outs on layer MODULAREA.
-  // Largest polygon(s) = Dachfläche; smaller polygons nested inside = Störflächen.
+  
   const ma=(byL['MODULAREA']||[]).filter(e=>e.verts.length>=3).map(e=>e.verts);
   if(ma.length){
     const withArea=ma.map(v=>({v,a:Math.abs(polyArea(v))})).sort((x,y)=>y.a-x.a);
     const carriersMA=[], barredMA=[];
-    const big=withArea.filter(o=>o.a>=withArea[0].a*0.5).map(o=>o.v); // roof faces (similar large size)
+    const big=withArea.filter(o=>o.a>=withArea[0].a*0.5).map(o=>o.v); 
     withArea.forEach(o=>{
       const isCarrier=big.includes(o.v);
       if(isCarrier){ carriersMA.push(o.v); return; }
-      // smaller: störfläche if its centroid sits inside a carrier
       const c=centroid(o.v);
       if(carriersMA.some(cf=>pointInPoly(c,cf))) barredMA.push(o.v); else carriersMA.push(o.v);
     });
@@ -1057,15 +1019,11 @@ function onParsed(resolved){
     S.barred=S.barred.concat(barredMA);
   }
   S.env=(byL['ENVIRONMENT']||[]).map(e=>e.verts);
-  // SPT pre-placed aura plates (from DWG); empty for PV*Sol DXF
   S.sptAura = (window.__SPT_AURA||[]).slice();
-  // SPT roof faces with auto pitch + ridge line (from 3D RoofArea)
   S.roofs = (window.__SPT_ROOFS||[]).map((r,i)=>({verts:r.verts, pitch:r.pitch, ridge:r.ridge, idx:i, pitchUser:null}));
-  // SPT snowguard markers -> preset Schneefang points
   S.sptSnow = (byL['__SNOWGUARD__']||[]).map(e=>e.verts);
   S.buildings=clusterBuildings(S.mods);
-  // A roof may legitimately contain only Aura plates. Add one building per
-  // moduleless imported file, anchored by its roof outline (or Aura geometry).
+  
   const pkey=v=>v==null?'legacy':String(v);
   const covered=new Set(S.mods.map(m=>pkey(m.projectId)));
   const projectGroups={};
@@ -1083,8 +1041,7 @@ function onParsed(resolved){
   if(S.buildings.every(b=>b.projectId!=null))S.buildings.sort((a,b)=>Number(a.projectId)-Number(b.projectId));
   S.buildings.forEach((b,i)=>{b.name='H'+(i+1);});
   S.assign={};S.assignSnow={};S.drawnEdges=[];
-  // Layer „Aura" (DXF/DWG): geschlossene Polylinien = vom Anwender gezeichnetes
-  // Platten-Layout -> als Nutzer-Layout übernehmen (hat Vorrang vor der Automatik)
+  
   S.auraUser=null; S.auraSel=null; S.auraAnchor=null; S.auraImported=0;
   const auraLay='AURA';
   if(byL[auraLay]){
@@ -1107,15 +1064,10 @@ function onParsed(resolved){
   }
   buildEdgeCandidates();
   presetSchneefangEaves();
-  // Schneefang erkannt (SPT-Marker oder DXF-Layer) -> Berechnung automatisch einschalten
   if((S.sptSnow&&S.sptSnow.length)||(S.preset&&S.preset.some(p=>p.type==='Schneefang')))S.params.schneefang=true;
   return {ok:true};
 }
 
-/* ---- mehrere Dächer/Dateien zu EINEM Objekt zusammenführen ----
-   Jede Datei wird mit 8 m Abstand rechts neben die vorige gelegt; die Gebäude-
-   Erkennung (clusterBuildings) trennt die Dächer dann automatisch als H1, H2, …
-   und die Materialliste zeigt Spalten je Gebäude plus Gesamtsumme. */
 function parseProjects(projects){
   const comb=[],aura=[],roofs=[];
   let cursor=null;
@@ -1137,7 +1089,7 @@ function parseProjects(projects){
   return onParsed(comb);
 }
 
-window.__SUN={S,EDGE_TYPES,parse:onParsed,parseProjects,compute,nearestBuilding,centroid,polyLen,H,mid,userOverrideTypes,buildingFrame,render:function(){}};
+window.__SUN={S,EDGE_TYPES,parse:onParsed,parseProjects,compute,nearestBuilding,centroid,polyLen,H,mid,userOverrideTypes,buildingFrame,getPitchFactor,render:function(){}};
 })();
 
 </script>
@@ -1153,17 +1105,15 @@ const A=()=>window.__SUN,St=()=>window.__SUN.S,ET=()=>window.__SUN.EDGE_TYPES;
 const visibleBuilding=bn=>St().activeBuilding==='ALL'||St().activeBuilding===bn;
 const visiblePoly=v=>St().activeBuilding==='ALL'||A().nearestBuilding(A().centroid(v))===St().activeBuilding;
 
-let VIEW={x0:0,y0:0,scale:1,baseScale:1,zoom:1,panx:0,pany:0,W:900,H:560,pad:24}; // canvas transform
-let drawStart=null; // free-draw first point (world)
+let VIEW={x0:0,y0:0,scale:1,baseScale:1,zoom:1,panx:0,pany:0,W:900,H:560,pad:24}; 
+let drawStart=null; 
 
-/* ---- step ---- */
 function setStep(n){$$('.step').forEach(s=>{const v=+s.dataset.s;s.classList.toggle('active',v===n);s.classList.toggle('done',v<n);});$('#s1').classList.toggle('hidden',n>1);$('#s2').classList.toggle('hidden',n<2);}
 $$('.step').forEach(s=>{s.style.cursor='pointer';s.addEventListener('click',()=>{const id=s.dataset.scroll;const el=document.getElementById(id);if(el)el.scrollIntoView({behavior:'smooth',block:id==='params'?'start':'center'});});});
 
 /* ---- dropzone ---- */
 const drop=$('#drop'),file=$('#file');
 
-// Globalne zablokowanie domyślnego otwierania plików w całej przeglądarce
 window.addEventListener('dragover', e => e.preventDefault());
 window.addEventListener('drop',     e => e.preventDefault());
 
@@ -1177,13 +1127,12 @@ drop.addEventListener('drop',e=>{
 });
 file.addEventListener('change',e=>{if(e.target.files[0]){loadFile(e.target.files[0]);e.target.value='';}});
 
-// „+ Dach hinzufügen": nächste Datei wird zum Projekt DAZUgeladen statt es zu ersetzen
 const addRoof=$('#addroof');
 if(addRoof)addRoof.addEventListener('click',()=>{St().mergeNext=true;file.click();});
 
 function loadFile(f){
   const info=$('#parseinfo');info.style.display='block';info.className='note';info.innerHTML='Lese '+f.name+' …';
-  const merge=!!St().mergeNext; St().mergeNext=false; // „+ Dach hinzufügen"
+  const merge=!!St().mergeNext; St().mergeNext=false; 
   if(/\.dwg$/i.test(f.name)){
     const r=new FileReader();
     r.onload=async()=>{
@@ -1221,7 +1170,6 @@ function finishParse(resolved,f,info,merge){
 }
 function edgeSummary(){const L=St().layers,h=[];['First','Seitenanschlussprofil','Grat','Kehle','Schneefang'].forEach(k=>{if(L[k]&&L[k].length)h.push(k);});return h.length?h.join(', '):'keine';}
 
-/* ---- params ---- */
 function buildParams(){
   const p=St().params,box=$('#params');box.innerHTML='';
   box.appendChild(field('Bezugshöhe H₀','m ü. M.',selNum('h0',[[1000,'≤ 1000 m'],[1200,'≤ 1200 m'],[1400,'≤ 1400 m'],[1600,'≤ 1600 m'],[2000,'≤ 2000 m']],p.h0),p.h0>1400?'Über 1400 m: Aura nur mit Freigabe TS; XL ab 1600 m nicht zulässig.':'Modulhalter, Plattenauflager, Aura-Zulässigkeit.'));
@@ -1273,7 +1221,6 @@ function setEditorExpanded(on){
   setTimeout(()=>{VIEW.zoom=1;VIEW.panx=0;VIEW.pany=0;drawPlan();},0);
 }
 
-/* ---- edge editor palette ---- */
 function buildPalette(){
   const box=$('#palette');box.innerHTML='';const S=St();
   const types=Object.keys(ET());
@@ -1309,7 +1256,7 @@ function buildPalette(){
   const clr=el('button','edgebtn ghost','✕ Auswahl löschen');
   clr.onclick=()=>{S.assign={};S.assignSnow={};S.drawnEdges=[];S.activeTool=null;drawStart=null;setEditorExpanded(false);buildPalette();A().compute();renderAll();};
   box.appendChild(clr);
-  // when draw tool active, need a target type
+
   if(S.activeTool==='__draw'){
     const sel=el('select','drawtype');
     Object.keys(ET()).forEach(t=>{const o=el('option',null,ET()[t].label);o.value=t;if(S.drawType===t)o.selected=true;sel.appendChild(o);});
@@ -1317,7 +1264,7 @@ function buildPalette(){
     sel.onchange=()=>{S.drawType=sel.value;};
     box.appendChild(el('span',null,'&nbsp;als&nbsp;'));box.appendChild(sel);
   }
-  // Aura-Editor: Zusatzaktionen
+
   if(S.activeTool==='__aura'){
     const panel=$('#editorpanel');
     const full=el('button','edgebtn ghost',panel&&panel.classList.contains('expanded')?'Vollbild schliessen':'⛶ Vollbild');
@@ -1331,13 +1278,14 @@ function buildPalette(){
     const add=el('button','edgebtn','+ Platte');
     add.onclick=()=>{
       auraEnsureUser();
-      // Einfügepunkt: zuletzt geklickter Ort (×-Markierung, CAD-Prinzip), sonst Gebäudemitte
       const anchor=S.auraAnchor||null;
       const bn=anchor?A().nearestBuilding(anchor):(S.activeBuilding!=='ALL'?S.activeBuilding:A().nearestBuilding(S2W(VIEW.W/2,VIEW.H/2)));
       const b=S.buildings.find(x=>x.name===bn);
       const u=S.auraUser[bn]; if(!u||!b)return;
       const f=anchor?auraW2F(u,anchor[0],anchor[1]):auraW2F(u,b.cx,b.cy);
-      u.plates.push({x:Math.round((f[0]-0.69)*100)/100, y:Math.round((f[1]-0.435)*100)/100, w:1.38, h:0.87});
+      
+      const cosP = A().getPitchFactor(bn);
+      u.plates.push({x:Math.round((f[0]-0.69)*100)/100, y:Math.round((f[1]-0.435)*100)/100, w:1.38, h:0.78 * cosP});
       S.auraSel={b:bn,i:u.plates.length-1};
       A().compute();renderAll();
     };
@@ -1356,13 +1304,14 @@ function buildPalette(){
     if(S.auraSel){
       const u=S.auraUser&&S.auraUser[S.auraSel.b],p=u&&u.plates[S.auraSel.i];
       if(p){
+        const cosP = A().getPitchFactor(S.auraSel.b);
         box.appendChild(el('span',null,'Breite mm'));
         const wi=el('input','auradim');wi.type='number';wi.min=200;wi.max=5000;wi.step=1;wi.value=Math.round(p.w*1000);
         wi.onchange=()=>{p.w=Math.max(.2,(parseFloat(wi.value)||200)/1000);A().compute();renderAll();};
         box.appendChild(wi);
         box.appendChild(el('span',null,'Höhe mm'));
-        const hi=el('input','auradim');hi.type='number';hi.min=200;hi.max=2000;hi.step=1;hi.value=Math.round(p.h*1000);
-        hi.onchange=()=>{p.h=Math.max(.2,(parseFloat(hi.value)||200)/1000);A().compute();renderAll();};
+        const hi=el('input','auradim');hi.type='number';hi.min=200;hi.max=2000;hi.step=1;hi.value=Math.round((p.h/cosP)*1000);
+        hi.onchange=()=>{p.h=Math.max(.2,(parseFloat(hi.value)||200)/1000) * cosP;A().compute();renderAll();};
         box.appendChild(hi);
       }
     }
@@ -1371,13 +1320,12 @@ function buildPalette(){
     ? 'Freihand: Startpunkt klicken, dann Endpunkt. Wird als '+(ET()[S.drawType]||{label:''}).label+' gezählt.'
     : (S.activeTool==='__aura' ? 'Platte ziehen = verschieben · Kante ziehen = Grösse · Alt hält Snap vorübergehend aus · exakte Masse stehen nach Auswahl oben in mm · „Auto ergänzen" behält das vorhandene Layout'+(S.auraMessage?' · '+S.auraMessage:'')
     : (S.activeTool==='Schneefang' ? 'Klicke Kanten an, um Schneefang zu setzen (zusätzlich zu Traufe möglich). Manuelle Markierung ersetzt die automatische Schneefang-Erkennung.'
-    : (S.activeTool ? 'Klicke Kanten an, um sie als '+ET()[S.activeTool].label+' zu markieren.' : 'Wähle oben einen Kanten-Typ, dann klicke Kanten auf dem Plan an.')));
+    : (S.activeTool==='__aurazone' ? 'Aura-Feld: Klicke oben links, dann unten rechts, um das Feld automatisch mit Platten zu füllen.'
+    : (S.activeTool ? 'Klicke Kanten an, um sie als '+ET()[S.activeTool].label+' zu markieren.' : 'Wähle oben einen Kanten-Typ, dann klicke Kanten auf dem Plan an.'))));
 }
 
-/* ---- building pills ---- */
 function buildPills(){const box=$('#pills');box.innerHTML='';const S=St();const all=el('div','pill'+(S.activeBuilding==='ALL'?' on':''),'Alle');all.onclick=()=>{S.activeBuilding='ALL';VIEW.zoom=1;VIEW.panx=0;VIEW.pany=0;renderAll();};box.appendChild(all);const multi=S.projects&&S.projects.length>1;S.buildings.forEach(b=>{const label=multi&&b.projectName?(b.name+' · Dach '+(Number(b.projectId)+1)):b.name;const p=el('div','pill'+(S.activeBuilding===b.name?' on':''),label);if(b.projectName)p.title=b.projectName;p.onclick=()=>{S.activeBuilding=b.name;VIEW.zoom=1;VIEW.panx=0;VIEW.pany=0;renderAll();};box.appendChild(p);});}
 
-/* ---- canvas ---- */
 function computeView(){
   const S=St(),cv=$('#plan'),host=cv.parentElement,panel=$('#editorpanel');
   const cw=Math.max(280,Math.floor((host&&host.clientWidth)||cv.clientWidth||900));
@@ -1391,12 +1339,9 @@ function computeView(){
   VIEW.x0=minx;VIEW.y0=miny;VIEW.baseScale=s;VIEW.scale=s*(VIEW.zoom||1);VIEW.maxy=maxy;
   VIEW.cx=(minx+maxx)/2;VIEW.cy=(miny+maxy)/2;
 }
-// World->screen with zoom around center + pan offset
-function W2S(x,y){const z=VIEW.zoom||1;const sx=VIEW.pad+(x-VIEW.x0)*VIEW.baseScale;const sy=VIEW.H-VIEW.pad-(y-VIEW.y0)*VIEW.baseScale;
-  // zoom around canvas center, then pan
-  return [ (sx-VIEW.W/2)*z+VIEW.W/2+(VIEW.panx||0), (sy-VIEW.H/2)*z+VIEW.H/2+(VIEW.pany||0) ];}
-function S2W(px,py){const z=VIEW.zoom||1;const sx=(px-(VIEW.panx||0)-VIEW.W/2)/z+VIEW.W/2;const sy=(py-(VIEW.pany||0)-VIEW.H/2)/z+VIEW.H/2;
-  return [ (sx-VIEW.pad)/VIEW.baseScale+VIEW.x0, (VIEW.H-VIEW.pad-sy)/VIEW.baseScale+VIEW.y0 ];}
+
+function W2S(x,y){const z=VIEW.zoom||1;const sx=VIEW.pad+(x-VIEW.x0)*VIEW.baseScale;const sy=VIEW.H-VIEW.pad-(y-VIEW.y0)*VIEW.baseScale; return [ (sx-VIEW.W/2)*z+VIEW.W/2+(VIEW.panx||0), (sy-VIEW.H/2)*z+VIEW.H/2+(VIEW.pany||0) ];}
+function S2W(px,py){const z=VIEW.zoom||1;const sx=(px-(VIEW.panx||0)-VIEW.W/2)/z+VIEW.W/2;const sy=(py-(VIEW.pany||0)-VIEW.H/2)/z+VIEW.H/2; return [ (sx-VIEW.pad)/VIEW.baseScale+VIEW.x0, (VIEW.H-VIEW.pad-sy)/VIEW.baseScale+VIEW.y0 ];}
 
 function drawPlan(){
   const S=St(),cv=$('#plan'),ctx=cv.getContext('2d');const dpr=window.devicePixelRatio||1;
@@ -1404,17 +1349,13 @@ function drawPlan(){
   ctx.clearRect(0,0,VIEW.W,VIEW.H);
   const mods=S.activeBuilding==='ALL'?S.mods:S.buildings.find(b=>b.name===S.activeBuilding).mods;
   const poly=(v,st,fl,w,dash)=>{ctx.beginPath();v.forEach((p,i)=>{const[X,Y]=W2S(p[0],p[1]);i?ctx.lineTo(X,Y):ctx.moveTo(X,Y);});if(fl){ctx.fillStyle=fl;ctx.fill();}if(st){ctx.setLineDash(dash||[]);ctx.strokeStyle=st;ctx.lineWidth=w||1;ctx.stroke();ctx.setLineDash([]);}};
-  // roof planes (carriers) — outline + faint fill = Dachumriss
+  
   const visibleCarriers=S.carriers.filter(visiblePoly);
   visibleCarriers.forEach(v=>poly(v,'#c9a26b','rgba(214,170,110,.10)',1));
-  // auto-detected ridge (First) lines from SPT roof faces — red dashed
   (S.roofs||[]).filter(r=>visiblePoly(r.verts)).forEach(r=>{ if(r.ridge) poly([r.ridge[0],r.ridge[1]],'#c0392b',null,2,[7,4]); });
-  // env outline
   S.env.filter(visiblePoly).forEach(v=>poly(v,'#999',null,1,[4,3]));
-  // barred
   S.barred.filter(visiblePoly).forEach(v=>poly(v,'#bbb','rgba(180,180,180,.30)',1));
-  // computed/SPT Aura plates, colored by width (opaque so they don't bleed through modules).
-  // Im Editor-Modus live aus S.auraUser zeichnen (während des Ziehens, vor compute()).
+  
   const auraEdit = S.activeTool==='__aura' && S.auraUser;
   if(S.showAura!==false){
     const ac={2770:'#7aa85a',1940:'#a7c97a',1380:'#c4dca8',cut:'#e0a046'};
@@ -1430,19 +1371,15 @@ function drawPlan(){
       S.auraRects.filter(r=>visiblePoly(r.verts)).forEach(r=>poly(r.verts, 'rgba(90,110,70,.6)', ac[r.kind]||'#b4b4b4', 0.4));
     }
   }
-  // modules (opaque, drawn on top of aura)
   const col={L:'#1b4f9c',M:'#3a74c4',XL:'#0e3a78'};
   mods.forEach(m=>poly(m.v,'#13386e',col[m.type]||'#1b4f9c',0.6));
-  // AUTO edge data (drawn UNDER the clickable candidates, semi-transparent + dashed,
-  // and hidden per type as soon as the user marks that type manually — mirrors the counting)
+  
   const over=A().userOverrideTypes();
-  // DXF-Layer-Vorbelegung (PV*Sol): First/Ort/Grat/Kehle/Schneefang aus der Datei
   if(S.preset && S.preset.length){
     ctx.globalAlpha=.55;
     S.preset.forEach(p=>{ if(visiblePoly([p.a,p.b])&&!over.has(p.type)) poly([p.a,p.b],ET()[p.type].col,null,3,[8,5]); });
     ctx.globalAlpha=1;
   }
-  // SPT snow-guard line (Schneefang) — runs along the eave edges of the snow-guard plates
   if(S.showSnow!==false && !over.has('Schneefang') && S.sptSnow && S.sptSnow.length){
     ctx.globalAlpha=.55; ctx.strokeStyle='#7a4fc0'; ctx.lineWidth=4; ctx.lineCap='round'; ctx.setLineDash([8,5]);
     S.sptSnow.forEach(seg=>{ if(!seg||seg.length<2||!visiblePoly(seg))return;
@@ -1451,27 +1388,23 @@ function drawPlan(){
     });
     ctx.setLineDash([]); ctx.lineCap='butt'; ctx.globalAlpha=1;
   }
-  // candidate edges (clickable) — interior dashed grey, boundary thin grey
+  
   S.edgeCands.filter(e=>visibleBuilding(A().nearestBuilding(e.m))).forEach(e=>{
     const t=S.assign[e.id];
     const c=t?ET()[t].col:(e.interior?'#aab':'#cbd');
     const w=t?3.5:(e.interior?2:1.4);
     poly([e.a,e.b],c,null,w, t?[]:(e.interior?[6,4]:[2,4]));
-    // Schneefang overlay: solid purple line, parallel-offset so it stays visible
-    // even when the same edge is also marked (e.g. as Traufe)
     if(S.assignSnow && S.assignSnow[e.id]){
       const[ax,ay]=W2S(e.a[0],e.a[1]),[bx,by]=W2S(e.b[0],e.b[1]);
       const dx=bx-ax,dy=by-ay,L=Math.hypot(dx,dy)||1,nx=-dy/L*4,ny=dx/L*4;
       ctx.beginPath();ctx.moveTo(ax+nx,ay+ny);ctx.lineTo(bx+nx,by+ny);
       ctx.strokeStyle=ET().Schneefang.col;ctx.lineWidth=3;ctx.setLineDash([]);ctx.lineCap='round';ctx.stroke();ctx.lineCap='butt';
     }
-    // endpoint dots for clickable affordance
     if(!t){const[mx,my]=W2S(e.m[0],e.m[1]);ctx.beginPath();ctx.arc(mx,my,2.5,0,7);ctx.fillStyle='#99a';ctx.fill();}
   });
-  // free-drawn edges
+  
   S.drawnEdges.filter(e=>visiblePoly([e.a,e.b])).forEach(e=>poly([e.a,e.b],ET()[e.type].col,null,3.5));
   
-  // draw-in-progress
   if(drawStart){
     const[X,Y]=W2S(drawStart[0],drawStart[1]);
     ctx.beginPath();ctx.arc(X,Y,4,0,7);
@@ -1479,7 +1412,6 @@ function drawPlan(){
     ctx.fill();
   }
 
-  // numbered face badges ON TOP (match the "Dachneigung je Fläche" panel) so faces↔pitch are mappable
   if(S.roofs && S.roofs.length && S.activeBuilding==='ALL'){
     S.roofs.forEach((r,i)=>{
       if(!r.verts||!r.verts.length)return;
@@ -1493,17 +1425,18 @@ function drawPlan(){
     });
     ctx.textAlign='start';ctx.textBaseline='alphabetic';
   }
-  // Aura-Editor: Einfügepunkt (×) am zuletzt geklickten Ort
+  
   if(auraEdit && S.auraAnchor){
     const[X,Y]=W2S(S.auraAnchor[0],S.auraAnchor[1]);
     ctx.strokeStyle='#c0392b';ctx.lineWidth=2;ctx.setLineDash([]);
     ctx.beginPath();ctx.moveTo(X-6,Y-6);ctx.lineTo(X+6,Y+6);ctx.moveTo(X-6,Y+6);ctx.lineTo(X+6,Y-6);ctx.stroke();
   }
-  // Aura-Editor: Breitenlabels auf allen Platten, Auswahl mit Rahmen + Griffen + Massen
+  
   if(auraEdit){
     ctx.textAlign='center';ctx.textBaseline='middle';
     Object.keys(S.auraUser).filter(visibleBuilding).forEach(bn=>{
       const u=S.auraUser[bn];
+      const cosP = A().getPitchFactor(bn);
       u.plates.forEach((p,i)=>{
         const c=auraF2W(u,p.x+p.w/2,p.y+p.h/2);const[X,Y]=W2S(c[0],c[1]);
         ctx.font='10px ui-monospace,monospace';ctx.fillStyle='rgba(30,40,20,.85)';
@@ -1520,7 +1453,7 @@ function drawPlan(){
           });
           const t=auraF2W(u,p.x+p.w/2,p.y+p.h);const[tx,ty]=W2S(t[0],t[1]);
           ctx.font='bold 11px ui-monospace,monospace';ctx.fillStyle='#c0392b';
-          ctx.fillText(Math.round(p.w*1000)+' × '+Math.round(p.h*1000)+' mm',tx,ty-12);
+          ctx.fillText(Math.round(p.w*1000)+' × '+Math.round((p.h/cosP)*1000)+' mm',tx,ty-12);
         }
       });
     });
@@ -1529,22 +1462,18 @@ function drawPlan(){
   $('#planmeta').textContent=`${mods.length} Module · ${visibleCarriers.length} Dachflächen`;
 }
 
-/* ---- canvas interaction ---- */
 function canvasXY(ev){const cv=$('#plan'),r=cv.getBoundingClientRect();return [(ev.clientX-r.left)*VIEW.W/r.width,(ev.clientY-r.top)*VIEW.H/r.height];}
 function nearestCandidate(sx,sy){
-  const S=St();let best=null,bd=12; // px threshold
+  const S=St();let best=null,bd=12; 
   S.edgeCands.filter(e=>visibleBuilding(A().nearestBuilding(e.m))).forEach(e=>{const[ax,ay]=W2S(e.a[0],e.a[1]),[bx,by]=W2S(e.b[0],e.b[1]);const d=ptSeg(sx,sy,ax,ay,bx,by);if(d<bd){bd=d;best=e;}});
   return best;
 }
 function ptSeg(px,py,ax,ay,bx,by){const dx=bx-ax,dy=by-ay,l2=dx*dx+dy*dy;let t=l2?((px-ax)*dx+(py-ay)*dy)/l2:0;t=Math.max(0,Math.min(1,t));const cx=ax+t*dx,cy=ay+t*dy;return Math.hypot(px-cx,py-cy);}
 
-/* ---- Aura-Editor: Helfer ---- */
 const AURA_STD=[1.38,1.94,2.77];
 function auraKindByW(w){const s=AURA_STD.find(v=>Math.abs(w-v)<=0.06);return s?(s===2.77?'2770':s===1.94?'1940':'1380'):'cut';}
-// Welt <-> Rotationsrahmen eines Gebäudes
 function auraW2F(u,wx,wy){const{cc,ss}=u.frame;return [wx*cc-wy*ss, wx*ss+wy*cc];}
 function auraF2W(u,fx,fy){const{cc,ss}=u.frame;return [fx*cc+fy*ss, -fx*ss+fy*cc];}
-// erste Bearbeitung: aktuelles Auto-Layout in S.auraUser einfrieren
 function auraEnsureUser(){
   const S=St();
   if(!S.auraUser) S.auraUser={};
@@ -1568,7 +1497,6 @@ function auraOverlap(a,b){
   if(w<=0||h<=0)return false;
   return w*h>Math.min(a.w*a.h,b.w*b.h)*.55;
 }
-// Add only missing automatic plates; never discard imported or manually edited plates.
 function auraMergeAuto(){
   const S=St();auraEnsureUser();
   const user=S.auraUser;
@@ -1589,7 +1517,6 @@ function auraMergeAuto(){
   A().compute();renderAll();
   return added;
 }
-// Platte unter dem Cursor: {b,i,edge:null|'e'|'w'|'n'|'s'} — Kante innerhalb 6 px = Resize
 function auraHit(sx,sy){
   const S=St(); if(!S.auraUser) return null;
   const w=S2W(sx,sy);
@@ -1612,7 +1539,6 @@ function auraHit(sx,sy){
   }
   return null;
 }
-// Snap-Kandidaten: Modulkanten + Störflächenkanten + Kanten der anderen Platten (im Rahmen)
 function auraSnapCands(bn){
   const S=St(); const u=S.auraUser[bn];
   const b=S.buildings.find(x=>x.name===bn);
@@ -1623,7 +1549,7 @@ function auraSnapCands(bn){
     xs.push(x0,x1);ys.push(y0,y1);
   };
   (b?b.mods:[]).forEach(m=>addBox(m.v));
-  (S.barred||[]).filter(v=>A().nearestBuilding(A().centroid(v))===bn).forEach(v=>addBox(v)); // only this roof
+  (S.barred||[]).filter(v=>A().nearestBuilding(A().centroid(v))===bn).forEach(v=>addBox(v)); 
   u.plates.forEach((p,i)=>{ if(S.auraSel&&S.auraSel.b===bn&&S.auraSel.i===i)return; xs.push(p.x,p.x+p.w);ys.push(p.y,p.y+p.h); });
   return {xs,ys};
 }
@@ -1633,7 +1559,7 @@ function snapDelta(edges,cands,tol){let delta=0,bd=tol;for(const e of edges)for(
 function setupCanvas(){
   const cv=$('#plan');
   let dragging=false, dragMoved=false, lastX=0, lastY=0;
-  let auraDrag=null; // {b,i,edge,f0,orig,cands} — aktive Platten-Bearbeitung
+  let auraDrag=null; 
   
   cv.addEventListener('wheel',ev=>{
     ev.preventDefault();
@@ -1662,7 +1588,6 @@ function setupCanvas(){
       if(S.auraSel){S.auraSel=null;buildPalette();drawPlan();}
     }
     
-    // Zablokuj przesuwanie planu, gdy rysujemy strefę lub linię
     if(S.activeTool==='__aurazone' || S.activeTool==='__draw') return;
     
     dragging=true;dragMoved=false;lastX=x;lastY=y;
@@ -1716,18 +1641,16 @@ function setupCanvas(){
   });
   
   cv.addEventListener('click',ev=>{
-    const S=St();if(dragMoved){dragMoved=false;return;} // ignore clicks that were drags
+    const S=St();if(dragMoved){dragMoved=false;return;} 
     if(!S.activeTool)return;
 
-    // Logika dla narzędzia "Aura-Feld zeichnen"
     if(S.activeTool==='__aurazone'){
       const[sx,sy]=canvasXY(ev);
       const w=S2W(sx,sy);
       if(!drawStart){
-        drawStart=w; // Zapisz pierwsze kliknięcie
-        drawPlan();  // Narysuje kropkę startową
+        drawStart=w; 
+        drawPlan();  
       } else {
-        // Drugie kliknięcie: wypełnij zaznaczony obszar
         auraEnsureUser();
         const bn = S.activeBuilding !== 'ALL' ? S.activeBuilding : A().nearestBuilding(w);
         if(S.auraUser[bn]) {
@@ -1740,8 +1663,9 @@ function setupCanvas(){
           const maxX = Math.max(f1[0], f2[0]);
           const maxY = Math.max(f1[1], f2[1]);
           
+          const cosP = A().getPitchFactor(bn);
           const pW = 1.38;
-          const pH = 0.78; // Stała wysokość 780mm
+          const pH = 0.78 * cosP; 
           
           for(let py = minY; py + pH <= maxY + 0.1; py += pH) {
             for(let px = minX; px + pW <= maxX + 0.1; px += pW) {
@@ -1751,7 +1675,7 @@ function setupCanvas(){
           }
         }
         drawStart = null;
-        S.activeTool = null; // Zakończ narzędzie po wyrysowaniu
+        S.activeTool = null; 
         buildPalette();
         A().compute();
         renderAll();
@@ -1760,7 +1684,6 @@ function setupCanvas(){
     }
 
     if(S.activeTool==='__aura'){
-      // Klick auf leere Fläche = Einfügepunkt setzen (×), dort erzeugt „+ Platte" die Platte
       const[ax,ay]=canvasXY(ev);
       if(!auraHit(ax,ay)){ S.auraAnchor=S2W(ax,ay); drawPlan(); }
       return;
@@ -1775,7 +1698,6 @@ function setupCanvas(){
     const e=nearestCandidate(sx,sy);
     if(e){
       if(S.activeTool==='Schneefang'){
-        // Schneefang liegt ZUSÄTZLICH auf der Kante (z. B. Traufe + Schneefang) — nicht überschreiben
         if(S.assignSnow[e.id]) delete S.assignSnow[e.id]; else S.assignSnow[e.id]=true;
       } else {
         if(S.assign[e.id]===S.activeTool) delete S.assign[e.id]; else S.assign[e.id]=S.activeTool;
@@ -1783,12 +1705,12 @@ function setupCanvas(){
       A().compute();renderAll();
     }
   });
-  // zoom buttons
+  
   const zin=$('#zoomin'),zout=$('#zoomout'),zfit=$('#zoomfit');
   if(zin)zin.onclick=()=>{VIEW.zoom=Math.min(40,(VIEW.zoom||1)*1.3);drawPlan();};
   if(zout)zout.onclick=()=>{VIEW.zoom=Math.max(0.3,(VIEW.zoom||1)/1.3);drawPlan();};
   if(zfit)zfit.onclick=()=>{VIEW.zoom=1;VIEW.panx=0;VIEW.pany=0;drawPlan();};
-  // Entf/Backspace löscht die ausgewählte Aura-Platte
+  
   window.addEventListener('keydown',ev=>{
     const S=St();
     if(ev.key==='Escape'&&$('#editorpanel').classList.contains('expanded')){setEditorExpanded(false);buildPalette();return;}
@@ -1801,9 +1723,7 @@ function setupCanvas(){
   });
 }
 
-/* ---- stats ---- */
 function renderStats(){const S=St(),r=S.result,box=$('#stats');box.innerHTML='';
-  // rows are keyed by article name now (pos codes were dropped), so match by name/artNr
   const sumBy=re=>r.rows.filter(x=>x.art&&re.test(x.art)).reduce((s,x)=>s+(x.total||0),0);
   const totMod=sumBy(/Modul (GG-|HC)/i);
   const totHalter=sumBy(/Modulhalter/i);
@@ -1813,7 +1733,6 @@ function renderStats(){const S=St(),r=S.result,box=$('#stats');box.innerHTML='';
    .forEach(([k,v])=>{const d=el('div','stat');d.appendChild(el('div','v',(v||0).toLocaleString('de-CH')));d.appendChild(el('div','k',k));box.appendChild(d);});
 }
 
-/* ---- table ---- */
 function renderTable(){const S=St(),r=S.result,t=$('#mat');t.innerHTML='';
   const showB=S.activeBuilding==='ALL'?r.buildings:[S.activeBuilding];
   const multiB=showB.length>1;
@@ -1826,7 +1745,6 @@ function renderTable(){const S=St(),r=S.result,t=$('#mat');t.innerHTML='';
   const ncol=4+(multiB?showB.length:0)+1;
   r.rows.forEach(row=>{
     if(row.group){const tr=el('tr','grouprow'),td=el('td',null,row.group);td.colSpan=ncol;tr.appendChild(td);tb.appendChild(tr);return;}
-    // hide all-zero rows (less clutter), but keep informativ m²/verbaut rows
     const tot=S.activeBuilding==='ALL'?row.total:(row.perB[S.activeBuilding]||0);
     if(!tot && !/informativ|Restfläche/.test(row.art)) return;
     const tr=el('tr');
@@ -1842,7 +1760,6 @@ function renderTable(){const S=St(),r=S.result,t=$('#mat');t.innerHTML='';
 }
 function fmt(v){if(v===0)return '–';if(Number.isInteger(v))return v.toLocaleString('de-CH');return v.toLocaleString('de-CH',{minimumFractionDigits:1,maximumFractionDigits:1});}
 
-/* ---- note ---- */
 function renderNote(){const S=St(),p=S.params,n=$('#assumptions');const warn=p.h0>1400&&p.auraGlobal;n.className='note'+(warn?' warn':'');
   const assigned=Object.keys(S.assign).length+Object.keys(S.assignSnow||{}).length+S.drawnEdges.length;
   n.innerHTML=(warn?'<b>H₀ &gt; 1400 m:</b> Aura 2 nur mit Freigabe TS. ':'')+
@@ -1854,7 +1771,6 @@ function renderNote(){const S=St(),p=S.params,n=$('#assumptions');const warn=p.h
     `Kanten ohne Zuweisung bleiben unberücksichtigt – First/Grat/Kehle im Editor markieren.`;
 }
 
-/* ---- export ---- */
 function buildAOA(){const S=St(),r=S.result,B=r.buildings,multiB=B.length>1,head=['Artikel-Nr.','Bezeichnung','Abmessung','Einheit',...(multiB?B:[]),'Anzahl'],aoa=[head];r.rows.forEach(row=>{if(row.group){aoa.push([row.group]);return;}if(!row.total && !/informativ|Restfläche/.test(row.art))return;aoa.push([row.artNr||'',row.art,row.dim||'',row.unit,...(multiB?B.map(b=>row.perB[b]||0):[]),row.total]);});return {aoa,B};}
 function exportCSV(){const {aoa}=buildAOA();const csv=aoa.map(r=>r.map(c=>{const s=String(c==null?'':c);return /[";\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}).join(';')).join('\r\n');dl(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}),'Materialliste_Sunskin_RoofLap.csv');}
 function xmlEsc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');}
