@@ -260,6 +260,7 @@
    ============================================================ */
 function parseDXF(text){
   const lines = text.split(/\r\n|\r|\n/);
+  // tokenize into (code,value) pairs
   const toks=[];
   for(let i=0;i<lines.length-1;i+=2){
     toks.push([parseInt(lines[i].trim(),10), lines[i+1]]);
@@ -430,7 +431,7 @@ const mid=(a,b)=>[(a[0]+b[0])/2,(a[1]+b[1])/2];
 const ang=(a,b)=>(((Math.atan2(b[1]-a[1],b[0]-a[0])*180/Math.PI)%180)+180)%180;
 function longEdge(v){let b=0,a=0;for(let i=0;i<v.length-1;i++){const dx=v[i+1][0]-v[i][0],dy=v[i+1][1]-v[i][1],l=Math.hypot(dx,dy);if(l>b){b=l;a=Math.atan2(dy,dx);}}return{len:b,ang:a};}
 function centroid(v){let x=0,y=0,n=0;for(const[px,py]of v){x+=px;y+=py;n++;}return[x/n,y/n];}
-function polyArea(v){let s=0;for(let i=0;i<v.length;i++){const[x1,y1]=v[i],[x2,y2]=v[(i+1)%v.length];s+=x1*y2-x2*y1;}return Math.abs(s)/2;}
+function polyArea(v){let s=0;for(let i=0;i<v.length-1;i++){const[x1,y1]=v[i],[x2,y2]=v[(i+1)%v.length];s+=x1*y2-x2*y1;}return Math.abs(s)/2;}
 function pointInPoly(pt,poly){let c=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const xi=poly[i][0],yi=poly[i][1],xj=poly[j][0],yj=poly[j][1];if(((yi>pt[1])!==(yj>pt[1]))&&(pt[0]<(xj-xi)*(pt[1]-yi)/(yj-yi)+xi))c=!c;}return c;}
 function polyLen(v){let s=0;for(let i=0;i<v.length-1;i++)s+=H(v[i],v[i+1]);return s;}
 function r1(x){return Math.round(x*10)/10;}
@@ -441,6 +442,16 @@ function getPitchFactor(bname) {
   if (!isProjected) return 1;
   const pitch = S.params.neigung || 0;
   return Math.cos(pitch * Math.PI / 180) || 1;
+}
+
+// Skok 45 stopni dla klawisza Shift
+function applyShiftSnap(startW, endW) {
+  const dx = endW[0] - startW[0];
+  const dy = endW[1] - startW[1];
+  const dist = Math.hypot(dx, dy);
+  const angle = Math.atan2(dy, dx);
+  const snappedAngle = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+  return [startW[0] + Math.cos(snappedAngle) * dist, startW[1] + Math.sin(snappedAngle) * dist];
 }
 
 // Oblicza rzeczywistą długość krawędzi (odkompensowując uciętą oś spadu)
@@ -576,7 +587,6 @@ function auraForBuilding(b){
   let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;carrR.forEach(v=>v.forEach(([x,y])=>{x0=Math.min(x0,x);y0=Math.min(y0,y);x1=Math.max(x1,x);y1=Math.max(y1,y);}));
   
   // Kompensacja nachylenia dla DXF z PV*SOL. Rzeczywista wysokość Aury to 780mm. 
-  // Na rzucie 2D skraca się ona do 780mm * cos(pitch).
   const cosP = getPitchFactor(b.name);
   const TRUE_PH = 0.78; 
   const ROW = TRUE_PH * cosP, PH = TRUE_PH * cosP, MINW = 0.05, GAP = 0.01;
@@ -678,7 +688,10 @@ function auraForBuilding(b){
       if(rightMod) fug++;
     });
   });
-  return {m2:Math.round(m2*10)/10, plates, byWidth, auraFugen:fug, plateRects, cutWidths, frame:{cc,ss}, framePlates, pieces:framePlates};
+  return {
+    m2:Math.round(m2*10)/10, plates, byWidth, auraFugen:fug, plateRects, cutWidths, frame:{cc,ss}, framePlates, 
+    pieces: framePlates.map(p => ({w: p.w, h: (p.h / cosP) + 0.05})) // +50mm fizycznego zakładki
+  };
 }
 
 function buildingFrame(b){
@@ -719,7 +732,11 @@ function auraFromUser(b){
     if(isModW(inv([p.x-0.06,yMid]))) fug++;
     if(isModW(inv([p.x+p.w+0.06,yMid]))) fug++;
   });
-  return {m2:Math.round(m2*10)/10, plates:u.plates.length, byWidth, auraFugen:fug, plateRects, cutWidths, frame:u.frame, framePlates:u.plates, pieces:u.plates, user:true};
+  return {
+    m2:Math.round(m2*10)/10, plates:u.plates.length, byWidth, auraFugen:fug, plateRects, cutWidths, frame:u.frame, framePlates:u.plates, 
+    pieces: u.plates.map(p => ({w: p.w, h: (p.h / cosP) + 0.05})), // +50mm fizycznego zakładki
+    user:true
+  };
 }
 
 function orderAuraPieces(pieces){
@@ -727,7 +744,8 @@ function orderAuraPieces(pieces){
   const STD=[1.38,1.94,2.77];
   const bucket=w=>{const s=STD.find(v=>w<=v+0.06)||2.77;return s===2.77?2770:s===1.94?1940:1380;};
   const fullH=[],lowH=[];
-  (pieces||[]).forEach(p=>{(p.h>0.44?fullH:lowH).push(p);});
+  // 435mm to idealnie połowa 870mm - jeśli element fizycznie potrzebuje <=435, zmieszczą się 2 sztuki.
+  (pieces||[]).forEach(p=>{(p.h>0.435?fullH:lowH).push(p);});
   const cutW=[];
   fullH.forEach(p=>{const s=STD.find(v=>Math.abs(p.w-v)<=0.06);if(s)order[s===2.77?2770:s===1.94?1940:1380]++;else cutW.push(p.w);});
   cutW.sort((a,b)=>b-a);
@@ -787,6 +805,7 @@ function edgeLengthsByBuilding(){
   
   function add(a,b,len,type){
     const nm=nearestBuilding(mid(a,b));
+    // Przelicza długość z uwzględnieniem kąta dachu (prawdziwa dł. w metrach)
     const tLen = trueLength(nm, a, b);
     out[nm][type]+=tLen;
     if(type==='First')out[nm].firstLines.push(tLen);
@@ -1104,6 +1123,7 @@ let VIEW={x0:0,y0:0,scale:1,baseScale:1,zoom:1,panx:0,pany:0,W:900,H:560,pad:24}
 let zonePoints=[];
 let zoneMouse=null;
 let drawStart=null; 
+let drawCurrent=null; 
 
 function setStep(n){$$('.step').forEach(s=>{const v=+s.dataset.s;s.classList.toggle('active',v===n);s.classList.toggle('done',v<n);});$('#s1').classList.toggle('hidden',n>1);$('#s2').classList.toggle('hidden',n<2);}
 $$('.step').forEach(s=>{s.style.cursor='pointer';s.addEventListener('click',()=>{const id=s.dataset.scroll;const el=document.getElementById(id);if(el)el.scrollIntoView({behavior:'smooth',block:id==='params'?'start':'center'});});});
@@ -1225,11 +1245,11 @@ function buildPalette(){
     const b=el('button','edgebtn'+(S.activeTool===t?' on':''));
     b.style.setProperty('--c',ET()[t].col);
     b.innerHTML=`<i style="background:${ET()[t].col}"></i>${ET()[t].label}`;
-    b.onclick=()=>{const leavingAura=S.activeTool==='__aura';S.activeTool=(S.activeTool===t?null:t);drawStart=null;zonePoints=[];if(leavingAura)setEditorExpanded(false);buildPalette();drawPlan();};
+    b.onclick=()=>{const leavingAura=S.activeTool==='__aura';S.activeTool=(S.activeTool===t?null:t);drawStart=null;zonePoints=[];drawCurrent=null;if(leavingAura)setEditorExpanded(false);buildPalette();drawPlan();};
     box.appendChild(b);
   });
   const draw=el('button','edgebtn'+(S.activeTool==='__draw'?' on':''),'✎ Freihand');
-  draw.onclick=()=>{const leavingAura=S.activeTool==='__aura';S.activeTool=(S.activeTool==='__draw'?null:'__draw');drawStart=null;zonePoints=[];if(leavingAura)setEditorExpanded(false);buildPalette();drawPlan();};
+  draw.onclick=()=>{const leavingAura=S.activeTool==='__aura';S.activeTool=(S.activeTool==='__draw'?null:'__draw');drawStart=null;zonePoints=[];drawCurrent=null;if(leavingAura)setEditorExpanded(false);buildPalette();drawPlan();};
   box.appendChild(draw);
   
   const aurZ = el('button', 'edgebtn' + (S.activeTool === '__aurazone' ? ' on' : ''), '▧ Aura-Feld zeichnen');
@@ -1239,6 +1259,7 @@ function buildPalette(){
     S.activeTool = (leaving ? null : '__aurazone');
     S.auraSel = null;
     drawStart = null;
+    drawCurrent = null;
     zonePoints = [];
     if (leaving) setEditorExpanded(false);
     buildPalette();
@@ -1248,11 +1269,11 @@ function buildPalette(){
 
   const aur=el('button','edgebtn'+(S.activeTool==='__aura'?' on':''),'⬚ Aura bearbeiten');
   aur.style.setProperty('--c','#5a7d3c');
-  aur.onclick=()=>{const leaving=S.activeTool==='__aura';S.activeTool=(leaving?null:'__aura');S.auraSel=null;drawStart=null;zonePoints=[];if(leaving)setEditorExpanded(false);buildPalette();drawPlan();};
+  aur.onclick=()=>{const leaving=S.activeTool==='__aura';S.activeTool=(leaving?null:'__aura');S.auraSel=null;drawStart=null;drawCurrent=null;zonePoints=[];if(leaving)setEditorExpanded(false);buildPalette();drawPlan();};
   box.appendChild(aur);
 
   const clr=el('button','edgebtn ghost','✕ Auswahl löschen');
-  clr.onclick=()=>{S.assign={};S.assignSnow={};S.drawnEdges=[];S.activeTool=null;drawStart=null;zonePoints=[];setEditorExpanded(false);buildPalette();A().compute();renderAll();};
+  clr.onclick=()=>{S.assign={};S.assignSnow={};S.drawnEdges=[];S.activeTool=null;drawStart=null;drawCurrent=null;zonePoints=[];setEditorExpanded(false);buildPalette();A().compute();renderAll();};
   box.appendChild(clr);
 
   if(S.activeTool==='__draw'){
@@ -1301,7 +1322,6 @@ function buildPalette(){
     rst.onclick=()=>{auraMergeAuto();};
     box.appendChild(rst);
     
-    // Tylko jak jest jedna wybrana to pokazujemy dokładne suwaki wymiarów
     if(S.auraSel && S.auraSel.indices.length === 1){
       const u=S.auraUser&&S.auraUser[S.auraSel.b], p=u&&u.plates[S.auraSel.indices[0]];
       if(p){
@@ -1318,10 +1338,10 @@ function buildPalette(){
     }
   }
   $('#editorhint').textContent = S.activeTool==='__draw'
-    ? 'Freihand: Startpunkt klicken, dann Endpunkt. Wird als '+(ET()[S.drawType]||{label:''}).label+' gezählt.'
-    : (S.activeTool==='__aura' ? 'Ziehen = Auswahlbox · Platte ziehen = verschieben · Kante ziehen = Grösse · Alt hält Snap aus · Entf = Auswahl löschen'+(S.auraMessage?' · '+S.auraMessage:'')
+    ? 'Freihand: Startpunkt klicken, dann Endpunkt (Shift = 45°). Wird als '+(ET()[S.drawType]||{label:''}).label+' gezählt.'
+    : (S.activeTool==='__aura' ? 'Ziehen = Auswahlbox · Platte ziehen = verschieben · Kante = Grösse · Alt hält Snap aus · Entf = Auswahl löschen'+(S.auraMessage?' · '+S.auraMessage:'')
     : (S.activeTool==='Schneefang' ? 'Klicke Kanten an, um Schneefang zu setzen (zusätzlich zu Traufe möglich). Manuelle Markierung ersetzt die automatische Schneefang-Erkennung.'
-    : (S.activeTool==='__aurazone' ? 'Aura-Feld: Klicke Punkte, um ein Polygon zu zeichnen. Klicke nahe Startpunkt oder drücke ENTER zum Füllen.'
+    : (S.activeTool==='__aurazone' ? 'Aura-Feld: Klicke Punkte für ein Polygon (Shift = 45°). Klicke nahe Startpunkt oder drücke ENTER zum Füllen.'
     : (S.activeTool ? 'Klicke Kanten an, um sie als '+ET()[S.activeTool].label+' zu markieren.' : 'Wähle oben einen Kanten-Typ, dann klicke Kanten auf dem Plan an.'))));
 }
 
@@ -1363,9 +1383,8 @@ function drawPlan(){
     if(auraEdit){
       Object.keys(S.auraUser).filter(visibleBuilding).forEach(bn=>{
         const u=S.auraUser[bn];
-        u.plates.forEach((p,i)=>{
+        u.plates.forEach(p=>{
           const v=[[p.x,p.y],[p.x+p.w,p.y],[p.x+p.w,p.y+p.h],[p.x,p.y+p.h]].map(([fx,fy])=>auraF2W(u,fx,fy));
-          // Kolorowanie małych formatek na czerwono
           const isSmall = p.w < 0.40;
           const fillCol = isSmall ? 'rgba(220,50,50,0.8)' : (ac[auraKindByW(p.w)]||'#b4b4b4');
           poly(v,'rgba(90,110,70,.6)', fillCol, 0.4);
@@ -1418,9 +1437,13 @@ function drawPlan(){
     ctx.beginPath();ctx.arc(X,Y,4,0,7);
     ctx.fillStyle = ET()[S.drawType||'First'].col;
     ctx.fill();
+    if(drawCurrent) {
+      const [cX,cY] = W2S(drawCurrent[0],drawCurrent[1]);
+      ctx.beginPath(); ctx.moveTo(X,Y); ctx.lineTo(cX,cY);
+      ctx.strokeStyle = ET()[S.drawType||'First'].col; ctx.lineWidth = 3; ctx.stroke();
+    }
   }
 
-  // Aura Zone Polygons
   if(S.activeTool === '__aurazone' && zonePoints.length > 0) {
     ctx.beginPath();
     const startS = W2S(zonePoints[0][0], zonePoints[0][1]);
@@ -1438,7 +1461,6 @@ function drawPlan(){
     ctx.setLineDash([5,5]);
     ctx.stroke();
     ctx.setLineDash([]);
-    
     ctx.beginPath();ctx.arc(startS[0], startS[1], 6, 0, 7);
     ctx.fillStyle = '#d98a1f';
     ctx.fill();
@@ -1597,7 +1619,7 @@ function auraSnapCands(bn){
   };
   (b?b.mods:[]).forEach(m=>addBox(m.v));
   (S.barred||[]).filter(v=>A().nearestBuilding(A().centroid(v))===bn).forEach(v=>addBox(v)); 
-  u.plates.forEach((p,i)=>{ if(S.auraSel&&S.auraSel.b===bn&&S.auraSel.indices.includes(i))return; xs.push(p.x,p.x+p.w);ys.push(p.y,p.y+p.h); });
+  u.plates.forEach((p,i)=>{ if(S.auraSel&&S.auraSel.b===bn&&S.auraSel.indices.includes(i))return; xs.push(p.x,p.x+p.w, p.x-0.01, p.x+p.w+0.01);ys.push(p.y,p.y+p.h); });
   return {xs,ys};
 }
 function snapTo(v,cands,tol){let best=v,bd=tol;for(const c of cands){const d=Math.abs(c-v);if(d<bd){bd=d;best=c;}}return best;}
@@ -1634,7 +1656,7 @@ function finishAuraZone() {
         while(cx + 0.001 < endX) {
           let width = Math.min(pW, endX - cx);
           u.plates.push({x: cx, y: py, w: width, h: pH});
-          cx += width;
+          cx += width + 0.01; // Fuga 10mm
         }
       }
     }
@@ -1775,8 +1797,17 @@ function setupCanvas(){
     }
     
     if (S.activeTool === '__aurazone') {
-       zoneMouse = S2W(sx, sy);
+       let w = S2W(sx, sy);
+       if(ev.shiftKey && zonePoints.length > 0) w = applyShiftSnap(zonePoints[zonePoints.length-1], w);
+       zoneMouse = w;
        if (zonePoints.length > 0) drawPlan();
+    }
+
+    if (S.activeTool === '__draw' && drawStart) {
+       let w = S2W(sx, sy);
+       if(ev.shiftKey) w = applyShiftSnap(drawStart, w);
+       drawCurrent = w;
+       drawPlan();
     }
     
     if(dragging){const dx=sx-lastX,dy=sy-lastY;if(Math.abs(dx)+Math.abs(dy)>2)dragMoved=true;VIEW.panx+=dx;VIEW.pany+=dy;lastX=sx;lastY=sy;drawPlan();cv.style.cursor='grabbing';return;}
@@ -1796,7 +1827,8 @@ function setupCanvas(){
 
     if(S.activeTool==='__aurazone'){
       const[sx,sy]=canvasXY(ev);
-      const w=S2W(sx,sy);
+      let w=S2W(sx,sy);
+      if(zonePoints.length > 0 && ev.shiftKey) w = applyShiftSnap(zonePoints[zonePoints.length-1], w);
       
       if(zonePoints.length > 0 && window.__SUN.H(zonePoints[0], w) < 0.5) {
          finishAuraZone();
@@ -1814,9 +1846,15 @@ function setupCanvas(){
     }
     const[sx,sy]=canvasXY(ev);
     if(S.activeTool==='__draw'){
-      const w=S2W(sx,sy);
+      let w=S2W(sx,sy);
       if(!drawStart){drawStart=w;drawPlan();}
-      else{const len=window.__SUN.H(drawStart,w);S.drawnEdges.push({a:drawStart,b:w,len,type:S.drawType||'First'});drawStart=null;A().compute();renderAll();}
+      else{
+        if(ev.shiftKey) w = applyShiftSnap(drawStart, w);
+        const len=window.__SUN.H(drawStart,w);
+        S.drawnEdges.push({a:drawStart,b:w,len,type:S.drawType||'First'});
+        drawStart=null; drawCurrent=null;
+        A().compute();renderAll();
+      }
       return;
     }
     const e=nearestCandidate(sx,sy);
