@@ -71,7 +71,7 @@
     display:block;max-width:100%;background:#fbfbf8;
     user-select:none;-webkit-user-select:none;
   }
-  @media(max-width:900px){.grid{grid-template-columns:1fr}}
+  @media(max-width:1200px){.grid{grid-template-columns:1fr}}
 
   .panel{background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow)}
   .panel h2{
@@ -180,6 +180,7 @@
     <div class="step" data-s="3" data-scroll="mat"><span class="n">3</span> Materialliste</div>
   </div>
 
+  <!-- STEP 1 -->
   <section id="s1">
     <div class="drop" id="drop">
       <div class="big">DXF- oder DWG-Plan hierher ziehen</div>
@@ -190,19 +191,22 @@
     <div class="note" id="parseinfo" style="display:none"></div>
   </section>
 
+  <!-- STEP 2+3 -->
   <section id="s2" class="hidden">
     <div class="grid">
+      <!-- left: parameters -->
       <div class="panel">
         <h2>Parameter <span class="tag">Projekt</span></h2>
         <div class="body" id="params"></div>
       </div>
+      <!-- right: preview + results -->
       <div>
         <div class="panel editor-panel" id="editorpanel" style="margin-bottom:24px">
           <h2>Kanten-Editor <span id="planmeta" style="font-family:var(--mono);font-size:11px;color:#999;text-transform:none;letter-spacing:0"></span></h2>
           <div class="palette" id="palette"></div>
           <div class="editorhint" id="editorhint"></div>
           <div class="preview" style="position:relative">
-            <canvas id="plan" width="1200" height="720"></canvas>
+            <canvas id="plan" width="1200" height="750"></canvas>
             <div class="zoomctl" style="position:absolute;right:10px;bottom:10px;display:flex;flex-direction:column;gap:4px">
               <button id="zoomin"  title="Vergrößern"  style="width:30px;height:30px;font-size:18px;line-height:1;border:1px solid var(--line);background:#fff;border-radius:6px;cursor:pointer">+</button>
               <button id="zoomout" title="Verkleinern"  style="width:30px;height:30px;font-size:18px;line-height:1;border:1px solid var(--line);background:#fff;border-radius:6px;cursor:pointer">−</button>
@@ -250,10 +254,10 @@
   <span>Stückzahlen prüfen · „Die Masse sind auf dem Bau zu kontrollieren"</span>
 </footer>
 
-<!-- Offline XLSX export is implemented below; no external scripts required. -->
 <script>
 /* ============================================================
    DXF PARSER  (minimal, tuned for PV*Sol / EliteCAD exports)
+   Handles: LWPOLYLINE, LINE, INSERT (with block resolution)
    ============================================================ */
 function parseDXF(text){
   const lines = text.split(/\r\n|\r|\n/);
@@ -431,7 +435,6 @@ function pointInPoly(pt,poly){let c=false;for(let i=0,j=poly.length-1;i<poly.len
 function polyLen(v){let s=0;for(let i=0;i<v.length-1;i++)s+=H(v[i],v[i+1]);return s;}
 function r1(x){return Math.round(x*10)/10;}
 
-// Oblicza czynnik rzutowania z DXF (cosinus nachylenia), aby skompensować wymiary
 function getPitchFactor(bname) {
   const isProjected = !(S.roofs && S.roofs.length);
   if (!isProjected) return 1;
@@ -439,7 +442,6 @@ function getPitchFactor(bname) {
   return Math.cos(pitch * Math.PI / 180) || 1;
 }
 
-// Oblicza rzeczywistą długość krawędzi (odkompensowując uciętą oś spadu)
 function trueLength(bname, ptA, ptB) {
   const b = S.buildings.find(x => x.name === bname);
   const isProjected = !(S.roofs && S.roofs.length);
@@ -453,7 +455,7 @@ function trueLength(bname, ptA, ptB) {
   const lxB = ptB[0] * cc - ptB[1] * ss;
   const lyB = ptB[0] * ss + ptB[1] * cc;
   
-  const dyTrue = (lyB - lyA) / cosP; // rozciągamy oś spadu dachu z powrotem do 100%
+  const dyTrue = (lyB - lyA) / cosP; 
   const dxTrue = lxB - lxA;
   
   return Math.hypot(dxTrue, dyTrue);
@@ -462,11 +464,8 @@ function trueLength(bname, ptA, ptB) {
 function normalizeScale(resolved,insUnits=null){
   const allowed = ['MODULES','MODULAREA','MODULECARRIERS','AURA','BARREDAREAS','ENVIRONMENT','FIRST','GRAT','KEHLE','ORT','SCHNEEFANG'];
   const filtered = (resolved||[]).filter(e => allowed.includes(canonicalLayer(e.layer).toUpperCase()));
-  
-  const moduleLens=filtered.filter(e=>canonicalLayer(e.layer)==='MODULES'&&e.verts&&e.verts.length>=4)
-    .map(e=>longEdge(e.verts).len).filter(Number.isFinite).sort((a,b)=>a-b);
-  const auraLens=moduleLens.length?[]:filtered.filter(e=>canonicalLayer(e.layer)==='AURA'&&e.verts&&e.verts.length>=4)
-    .map(e=>longEdge(e.verts).len).filter(Number.isFinite).sort((a,b)=>a-b);
+  const moduleLens=filtered.filter(e=>canonicalLayer(e.layer)==='MODULES'&&e.verts&&e.verts.length>=4).map(e=>longEdge(e.verts).len).filter(Number.isFinite).sort((a,b)=>a-b);
+  const auraLens=moduleLens.length?[]:filtered.filter(e=>canonicalLayer(e.layer)==='AURA'&&e.verts&&e.verts.length>=4).map(e=>longEdge(e.verts).len).filter(Number.isFinite).sort((a,b)=>a-b);
   const lens=moduleLens.length?moduleLens:auraLens;
   const unitFactor=({4:1000,5:100,6:1})[insUnits]||1;
   let factor=1,median=null;
@@ -571,15 +570,15 @@ function auraForBuilding(b){
   let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;carrR.forEach(v=>v.forEach(([x,y])=>{x0=Math.min(x0,x);y0=Math.min(y0,y);x1=Math.max(x1,x);y1=Math.max(y1,y);}));
   
   const cosP = getPitchFactor(b.name);
-  let PH = 0.78 * cosP;
-  // Mierzymy wysokość pojedynczego modułu na planie, aby idealnie zsynchronizować wiersze Aura z rzędami PV
+  
+  let pH = 0.78 * cosP;
   if (modR.length > 0) {
       let mny = 1e9, mxy = -1e9;
       modR[0].forEach(pt => { mny=Math.min(mny,pt[1]); mxy=Math.max(mxy,pt[1]); });
-      if ((mxy - mny) > 0.4 && (mxy - mny) < 1.2) PH = mxy - mny;
+      if ((mxy - mny) > 0.4 && (mxy - mny) < 1.2) pH = mxy - mny;
   }
-  const ROW = PH, MINW = 0.05, GAP = 0.01;
-  const WIDTHS=[2.77,1.94,1.38];
+  
+  const ROW = pH, PH = pH, MINW = 0.05, GAP = 0.01;
   
   let rx0=1e9,ry0=1e9,rx1=-1e9,ry1=-1e9;carrR.forEach(v=>v.forEach(([x,y])=>{rx0=Math.min(rx0,x);ry0=Math.min(ry0,y);rx1=Math.max(rx1,x);ry1=Math.max(ry1,y);}));
   const res=25,RW=Math.ceil((rx1-rx0)*res)+2,RH=Math.ceil((ry1-ry0)*res)+2;
@@ -610,7 +609,6 @@ function auraForBuilding(b){
     for(const y of ysR){ if(!onRoof(x,y)||isMod(x,y)) return false; }
     if(isBar(x,yb+PH/2)) return false;
     
-    // Blokada 300mm od kalenicy (First)
     if(firstEdges.length){
       const pt = inv([x, yb + PH]);
       for(const [fa, fb] of firstEdges){
@@ -704,7 +702,6 @@ function auraFromUser(b){
     let kind;
     if(std){ const k=std===2.77?2770:std===1.94?1940:1380; byWidth[k]++; kind=String(k); }
     else { byWidth.cut++; cutWidths.push(wmm); kind='cut'; }
-    // Kompensacja m2
     m2 += p.w * (p.h / cosP);
     plateRects.push({verts:[[p.x,p.y],[p.x+p.w,p.y],[p.x+p.w,p.y+p.h],[p.x,p.y+p.h]].map(inv), w:wmm, kind});
   });
@@ -1109,7 +1106,7 @@ $$('.step').forEach(s=>{s.style.cursor='pointer';s.addEventListener('click',()=>
 /* ---- dropzone ---- */
 const drop=$('#drop'),file=$('#file');
 
-// Globalne zablokowanie domyślnego otwierania plików w całej przeglądarce
+// Blokada domyślnego otwierania plików przy przeciąganiu (dla całego okna)
 window.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); });
 window.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); });
 
@@ -1363,7 +1360,7 @@ function computeView(){
   const S=St(),cv=$('#plan'),host=cv.parentElement,panel=$('#editorpanel');
   const cw=Math.max(280,Math.floor((host&&host.clientWidth)||cv.clientWidth||1600));
   const expanded=panel&&panel.classList.contains('expanded');
-  const ch=expanded?Math.max(320,Math.floor(host.clientHeight||window.innerHeight-220)):Math.max(700,Math.min(1000,Math.floor(window.innerHeight*.85)));
+  const ch=expanded?Math.max(320,Math.floor(host.clientHeight||window.innerHeight-220)):Math.max(750,Math.min(1100,Math.floor(window.innerHeight*.85)));
   VIEW.W=cw;VIEW.H=ch;
   const mods=S.activeBuilding==='ALL'?S.mods:S.buildings.find(b=>b.name===S.activeBuilding).mods;
   const allV=[...mods.map(m=>m.v),...S.carriers.filter(visiblePoly),...S.env.filter(visiblePoly)];
@@ -1397,7 +1394,7 @@ function drawPlan(){
         const u=S.auraUser[bn];
         u.plates.forEach(p=>{
           const v=[[p.x,p.y],[p.x+p.w,p.y],[p.x+p.w,p.y+p.h],[p.x,p.y+p.h]].map(([fx,fy])=>auraF2W(u,fx,fy));
-          // Kolorowanie małych formatek na czerwono (<400mm)
+          // Kolorowanie małych formatek na czerwono (<400mm rzeczywiste)
           const isSmall = p.w < 0.40;
           const fillCol = isSmall ? 'rgba(220,50,50,0.8)' : (ac[auraKindByW(p.w)]||'#b4b4b4');
           poly(v,'rgba(90,110,70,.6)', fillCol, 0.4);
@@ -1405,7 +1402,7 @@ function drawPlan(){
       });
     } else if(S.auraRects){
       S.auraRects.filter(r=>visiblePoly(r.verts)).forEach(r=>{
-        const isSmall = r.w < 0.40; // zrekompensowane metry, < 400mm
+        const isSmall = r.w < 400; // w mm
         const fillCol = isSmall ? 'rgba(220,50,50,0.8)' : (ac[r.kind]||'#b4b4b4');
         poly(r.verts, 'rgba(90,110,70,.6)', fillCol, 0.4);
       });
@@ -1596,7 +1593,7 @@ function applyAuraFill(bn, minW, maxW, polyF) {
   const gap = 0.01; // Fuga 10mm
   const stepX = pW + gap; // 1390 mm w poziomie
   
-  // Wysokość Aury zsynchronizowana z modułami PV, jeśli są dostępne na tym dachu
+  // Wysokość Aury zsynchronizowana z modułami PV (np. z PV*SOL)
   let pH = 0.78 * cosP;
   if (b && b.mods && b.mods.length > 0) {
     const modF = b.mods[0].v.map(pt => auraW2F(u, pt[0], pt[1]));
@@ -1663,12 +1660,12 @@ function applyAuraFill(bn, minW, maxW, polyF) {
         let maxPlateRight = gridL + pW;
         let width = Math.min(maxPlateRight - cx, endX - cx);
         
-        if (width <= 0) { cx += 0.01; continue; } // Ochrona przed nieskończoną pętlą
+        if (width <= 0) { cx += 0.01; continue; } 
         
         if (width > 0.05) { 
           let center = [cx + width/2, py + pH/2];
           if (pointInPoly(center, polyF)) {
-            // Kasowanie starych płyt pod nową 
+            // Kasowanie starych płyt pod nową (żeby się nie nakładały)
             u.plates = u.plates.filter(p => {
                const pcx = p.x + p.w/2, pcy = p.y + p.h/2;
                return !(Math.abs(pcy - center[1]) < 0.2 && pcx >= cx && pcx <= cx + width);
@@ -1698,7 +1695,7 @@ function finishAuraZone() {
         minY=Math.min(minY,p[1]); maxY=Math.max(maxY,p[1]); 
     });
     
-    // Używamy konwertera ramy z powrotem na pozycje świata by użyć applyAuraFill
+    // Używamy konwertera ramy z powrotem na pozycje świata
     const wMin = auraF2W(u, minX, minY);
     const wMax = auraF2W(u, maxX, maxY);
     
@@ -1726,7 +1723,7 @@ function setupCanvas(){
   },{passive:false});
   
   cv.addEventListener('mousedown',ev=>{
-    ev.preventDefault();
+    ev.preventDefault(); // Blokada zaznaczania na siłę
     const S=St();const[x,y]=canvasXY(ev);
     const w = S2W(x, y);
 
@@ -1901,7 +1898,7 @@ function setupCanvas(){
       
       if(zonePoints.length > 0) {
          const startS = W2S(zonePoints[0][0], zonePoints[0][1]);
-         // Zamknięcie obszaru przez kliknięcie blisko początku
+         // Zamknięcie obszaru przez kliknięcie blisko początku (20 pikseli)
          if (Math.hypot(sx - startS[0], sy - startS[1]) < 20) {
             finishAuraZone();
             return;
