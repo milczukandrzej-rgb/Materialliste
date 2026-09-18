@@ -29,7 +29,7 @@
       linear-gradient(90deg,rgba(27,79,156,.035) 1px,transparent 1px);
     background-size:24px 24px;
   }
-  .wrap{max-width:1600px;margin:0 auto;padding:0 24px 80px} /* BREDERER BEREICH */
+  .wrap{max-width:1600px;margin:0 auto;padding:0 24px 80px}
 
   /* ---- Masthead ---- */
   header.mast{
@@ -69,7 +69,7 @@
   .grid>div{min-width:0}
   #plan{
     display:block;max-width:100%;background:#fbfbf8;
-    user-select:none;-webkit-user-select:none; /* Zablokowanie zaznaczania tekstu na planie */
+    user-select:none;-webkit-user-select:none;
   }
   @media(max-width:900px){.grid{grid-template-columns:1fr}}
 
@@ -258,7 +258,6 @@
 <script>
 /* ============================================================
    DXF PARSER  (minimal, tuned for PV*Sol / EliteCAD exports)
-   Handles: LWPOLYLINE, LINE, INSERT (with block resolution)
    ============================================================ */
 function parseDXF(text){
   const lines = text.split(/\r\n|\r|\n/);
@@ -426,7 +425,6 @@ function canonicalLayer(name){
   return known[key]||leaf;
 }
 
-/* ---- geometry & projection helper ---- */
 const H=(a,b)=>Math.hypot(b[0]-a[0],b[1]-a[1]);
 const mid=(a,b)=>[(a[0]+b[0])/2,(a[1]+b[1])/2];
 const ang=(a,b)=>(((Math.atan2(b[1]-a[1],b[0]-a[0])*180/Math.PI)%180)+180)%180;
@@ -437,7 +435,6 @@ function pointInPoly(pt,poly){let c=false;for(let i=0,j=poly.length-1;i<poly.len
 function polyLen(v){let s=0;for(let i=0;i<v.length-1;i++)s+=H(v[i],v[i+1]);return s;}
 function r1(x){return Math.round(x*10)/10;}
 
-// Oblicza czynnik rzutowania z DXF (cosinus nachylenia), aby skompensować wymiary
 function getPitchFactor(bname) {
   const isProjected = !(S.roofs && S.roofs.length);
   if (!isProjected) return 1;
@@ -445,34 +442,26 @@ function getPitchFactor(bname) {
   return Math.cos(pitch * Math.PI / 180) || 1;
 }
 
-// Oblicza rzeczywistą długość krawędzi (odkompensowując uciętą oś spadu)
 function trueLength(bname, ptA, ptB) {
   const b = S.buildings.find(x => x.name === bname);
   const isProjected = !(S.roofs && S.roofs.length);
   if (!isProjected || !b) return H(ptA, ptB);
-  
   const cosP = getPitchFactor(bname);
   const { cc, ss } = buildingFrame(b);
-  
   const lxA = ptA[0] * cc - ptA[1] * ss;
   const lyA = ptA[0] * ss + ptA[1] * cc;
   const lxB = ptB[0] * cc - ptB[1] * ss;
   const lyB = ptB[0] * ss + ptB[1] * cc;
-  
-  const dyTrue = (lyB - lyA) / cosP; // rozciągamy oś spadu dachu z powrotem do 100%
+  const dyTrue = (lyB - lyA) / cosP; 
   const dxTrue = lxB - lxA;
-  
   return Math.hypot(dxTrue, dyTrue);
 }
 
 function normalizeScale(resolved,insUnits=null){
   const allowed = ['MODULES','MODULAREA','MODULECARRIERS','AURA','BARREDAREAS','ENVIRONMENT','FIRST','GRAT','KEHLE','ORT','SCHNEEFANG'];
   const filtered = (resolved||[]).filter(e => allowed.includes(canonicalLayer(e.layer).toUpperCase()));
-  
-  const moduleLens=filtered.filter(e=>canonicalLayer(e.layer)==='MODULES'&&e.verts&&e.verts.length>=4)
-    .map(e=>longEdge(e.verts).len).filter(Number.isFinite).sort((a,b)=>a-b);
-  const auraLens=moduleLens.length?[]:filtered.filter(e=>canonicalLayer(e.layer)==='AURA'&&e.verts&&e.verts.length>=4)
-    .map(e=>longEdge(e.verts).len).filter(Number.isFinite).sort((a,b)=>a-b);
+  const moduleLens=filtered.filter(e=>canonicalLayer(e.layer)==='MODULES'&&e.verts&&e.verts.length>=4).map(e=>longEdge(e.verts).len).filter(Number.isFinite).sort((a,b)=>a-b);
+  const auraLens=moduleLens.length?[]:filtered.filter(e=>canonicalLayer(e.layer)==='AURA'&&e.verts&&e.verts.length>=4).map(e=>longEdge(e.verts).len).filter(Number.isFinite).sort((a,b)=>a-b);
   const lens=moduleLens.length?moduleLens:auraLens;
   const unitFactor=({4:1000,5:100,6:1})[insUnits]||1;
   let factor=1,median=null;
@@ -546,13 +535,10 @@ function auraForBuilding(b){
   if(S.sptAura && S.sptAura.length){
     const plates=S.sptAura.filter(p=>nearestBuilding(centroid(p.verts))===b.name);
     if(plates.length){
-      const byW={};
-      let m2=0; const plateRects=[];
-      const frame=buildingFrame(b);
-      const framePlates=[];
+      const byW={}; let m2=0; const plateRects=[];
+      const frame=buildingFrame(b); const framePlates=[];
       plates.forEach(p=>{
-        const w=p.widthMM;
-        const bucket = w<=1380?1380 : (w<=1940?1940:2770);
+        const w=p.widthMM; const bucket = w<=1380?1380 : (w<=1940?1940:2770);
         byW[bucket]=(byW[bucket]||0)+1;
         m2 += (w/1000)*((p.heightMM||870)/1000);
         const kind = bucket===2770?'2770':bucket===1940?'1940':'1380';
@@ -562,8 +548,7 @@ function auraForBuilding(b){
           fx0=Math.min(fx0,fx);fy0=Math.min(fy0,fy);fx1=Math.max(fx1,fx);fy1=Math.max(fy1,fy);});
         framePlates.push({x:fx0,y:fy0,w:fx1-fx0,h:fy1-fy0});
       });
-      return {m2:Math.round(m2*10)/10, plates:plates.length, byWidth:byW, plateRects, frame, framePlates,
-        pieces:plates.map(p=>({w:p.widthMM/1000,h:(p.heightMM||870)/1000}))};
+      return {m2:Math.round(m2*10)/10, plates:plates.length, byWidth:byW, plateRects, frame, framePlates, pieces:plates.map(p=>({w:p.widthMM/1000,h:(p.heightMM||870)/1000}))};
     }
   }
 
@@ -595,7 +580,7 @@ function auraForBuilding(b){
     let cells=0;for(let i=0;i<roofR.length;i++)if(roofR[i]&&!rmodR[i]&&!rbarR[i])cells++;
     m2_projected=cells/(res*res);
   }
-  const m2 = m2_projected / cosP;
+  const m2 = m2_projected / cosP; 
 
   const STEP=0.02, EDGE=0.12, SNAP=0.08, LAP=0.10;
   let plates=0, fug=0; const byWidth={1380:0,1940:0,2770:0,cut:0}; const cutWidths=[];
@@ -613,7 +598,6 @@ function auraForBuilding(b){
     const ysR=[yb+LAP, yb+PH/2, yb+PH-LAP];
     for(const y of ysR){ if(!onRoof(x,y)||isMod(x,y)) return false; }
     if(isBar(x,yb+PH/2)) return false;
-    
     if(firstEdges.length){
       const pt = inv([x, yb + PH]);
       for(const [fa, fb] of firstEdges){
@@ -1111,8 +1095,9 @@ $$('.step').forEach(s=>{s.style.cursor='pointer';s.addEventListener('click',()=>
 /* ---- dropzone ---- */
 const drop=$('#drop'),file=$('#file');
 
-window.addEventListener('dragover', e => e.preventDefault());
-window.addEventListener('drop',     e => e.preventDefault());
+// Blokada domyślnego otwierania plików przy przeciąganiu (dla całego okna)
+window.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); });
+window.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); });
 
 drop.addEventListener('click',()=>file.click());
 drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('over');});
@@ -1257,7 +1242,7 @@ function buildPalette(){
 
   const aurB = el('button', 'edgebtn' + (S.activeTool === '__aurabox' ? ' on' : ''), '▧ Aura-Box');
   aurB.style.setProperty('--c', '#d98a1f');
-  aurB.title = "Klicken und ziehen, um einen Bereich mit Aura zu füllen";
+  aurB.title = "Klicken und ziehen, um einen rechteckigen Bereich mit Aura zu füllen";
   aurB.onclick = () => {
     const leaving = S.activeTool === '__aurabox';
     S.activeTool = (leaving ? null : '__aurabox');
@@ -1285,7 +1270,7 @@ function buildPalette(){
   box.appendChild(aur);
 
   const clr=el('button','edgebtn ghost','✕ Auswahl löschen');
-  clr.onclick=()=>{S.assign={};S.assignSnow={};S.drawnEdges=[];S.activeTool=null;drawStart=null;window.drawMouse=null;zonePoints=[];setEditorExpanded(false);buildPalette();A().compute();renderAll();};
+  clr.onclick=()=>{S.assign={};S.assignSnow={};S.drawnEdges=[];S.activeTool=null;drawStart=null;window.drawMouse=null;zonePoints=[];window.rectStart=null;window.rectCurrent=null;setEditorExpanded(false);buildPalette();A().compute();renderAll();};
   box.appendChild(clr);
 
   if(S.activeTool==='__draw'){
@@ -1406,7 +1391,7 @@ function drawPlan(){
       });
     } else if(S.auraRects){
       S.auraRects.filter(r=>visiblePoly(r.verts)).forEach(r=>{
-        const isSmall = r.w < 400; // w mm!
+        const isSmall = r.w < 0.40;
         const fillCol = isSmall ? 'rgba(220,50,50,0.8)' : (ac[r.kind]||'#b4b4b4');
         poly(r.verts, 'rgba(90,110,70,.6)', fillCol, 0.4);
       });
@@ -1554,7 +1539,7 @@ function drawPlan(){
     ctx.textAlign='start';ctx.textBaseline='alphabetic';
   }
 
-  // Draw Selection Box (Multi-Select)
+  // Draw Selection Box
   if (S.activeTool === '__aura' && window.auraDrag && window.auraDrag.type === 'select') {
     const [sx1, sy1] = W2S(window.auraDrag.startW[0], window.auraDrag.startW[1]);
     const [sx2, sy2] = W2S(window.auraDrag.endW[0], window.auraDrag.endW[1]);
@@ -1576,8 +1561,9 @@ function nearestCandidate(sx,sy){
 }
 function ptSeg(px,py,ax,ay,bx,by){const dx=bx-ax,dy=by-ay,l2=dx*dx+dy*dy;let t=l2?((px-ax)*dx+(py-ay)*dy)/l2:0;t=Math.max(0,Math.min(1,t));const cx=ax+t*dx,cy=ay+t*dy;return Math.hypot(px-cx,py-cy);}
 
-// Funkcja współdzielona do wypełniania obszaru (Box lub Polygon) ze wsparciem Fugi 10mm
+// Współdzielona funkcja do wypełniania obszaru (Box lub Polygon)
 function applyAuraFill(bn, minW, maxW, polyF) {
+  const S = St(); // ROZWIĄZANIE PROBLEMU: Teraz S jest poprawnie zadeklarowane
   auraEnsureUser();
   const u = S.auraUser[bn];
   if (!u) return;
@@ -1596,7 +1582,7 @@ function applyAuraFill(bn, minW, maxW, polyF) {
   const gap = 0.01; // Fuga 10mm
   const stepX = pW + gap; // 1390 mm w poziomie
   const pH = 0.78 * cosP;
-  const stepY = pH; // W pionie nakładają się na styk na ekranie (780mm)
+  const stepY = pH; 
 
   let anchorX = minX;
   let anchorY = minY;
@@ -1626,7 +1612,7 @@ function applyAuraFill(bn, minW, maxW, polyF) {
     ];
   }
 
-  // Wypełnianie Poligonu / Boxu z zachowaniem fug i dokowaniem do siatki
+  // Wypełnianie z zachowaniem fug i dokowaniem do siatki
   for (let py = startY; py + pH <= maxY + 0.1; py += stepY) {
     const yC = py + pH/2;
     let xs = [];
@@ -1643,7 +1629,7 @@ function applyAuraFill(bn, minW, maxW, polyF) {
       
       while(cx + 0.001 < endX) {
         let gridL = align(cx + 0.001, anchorX, stepX);
-        if (cx > gridL + pW) { // Przeskok, jeśli trafiliśmy na fugę
+        if (cx > gridL + pW) { 
            cx = gridL + stepX;
            if (cx >= endX) break;
            gridL = cx;
@@ -1655,7 +1641,7 @@ function applyAuraFill(bn, minW, maxW, polyF) {
         if (width > 0.05) { 
           let center = [cx + width/2, py + pH/2];
           if (pointInPoly(center, polyF)) {
-            // Kasowanie istniejących starych płyt pod nową (tylko z tego samego rzędu Y)
+            // Kasowanie starych płyt pod nową 
             u.plates = u.plates.filter(p => {
                const pcx = p.x + p.w/2, pcy = p.y + p.h/2;
                return !(Math.abs(pcy - center[1]) < 0.2 && pcx >= cx && pcx <= cx + width);
@@ -1664,9 +1650,7 @@ function applyAuraFill(bn, minW, maxW, polyF) {
           }
         }
         cx += width; 
-        if (Math.abs(cx - maxPlateRight) < 0.005) {
-           cx += gap; // Dodanie 10mm Fugi
-        }
+        if (Math.abs(cx - maxPlateRight) < 0.005) cx += gap; // 10mm Fugi
       }
     }
   }
@@ -1687,7 +1671,6 @@ function finishAuraZone() {
         minY=Math.min(minY,p[1]); maxY=Math.max(maxY,p[1]); 
     });
     
-    // Używamy konwertera ramy z powrotem na pozycje świata by użyć współdzielonej func.
     const wMin = auraF2W(u, minX, minY);
     const wMax = auraF2W(u, maxX, maxY);
     
@@ -1700,7 +1683,6 @@ function finishAuraZone() {
 function setupCanvas(){
   const cv=$('#plan');
   let dragging=false, dragMoved=false, lastX=0, lastY=0;
-  let auraDrag=null; 
   
   cv.addEventListener('wheel',ev=>{
     ev.preventDefault();
@@ -1716,7 +1698,7 @@ function setupCanvas(){
   },{passive:false});
   
   cv.addEventListener('mousedown',ev=>{
-    ev.preventDefault();
+    // Usuwamy zapobieganie defaultowych zachowań, by nie popsuć UI przeglądarki
     const S=St();const[x,y]=canvasXY(ev);
     const w = S2W(x, y);
 
