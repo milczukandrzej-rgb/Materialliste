@@ -29,12 +29,12 @@
       linear-gradient(90deg,rgba(27,79,156,.035) 1px,transparent 1px);
     background-size:24px 24px;
   }
-  .wrap{max-width:1280px;margin:0 auto;padding:0 24px 80px}
+  .wrap{max-width:1600px;margin:0 auto;padding:0 24px 80px} /* BREDERER BEREICH */
 
   /* ---- Masthead ---- */
   header.mast{
     border-bottom:2px solid var(--ink);margin-bottom:28px;
-    padding:26px 24px 16px;max-width:1280px;margin-left:auto;margin-right:auto;
+    padding:26px 24px 16px;max-width:1600px;margin-left:auto;margin-right:auto;
     display:flex;justify-content:space-between;align-items:flex-end;gap:24px;flex-wrap:wrap;
   }
   .mast h1{
@@ -65,11 +65,11 @@
   .drop .formats{margin-top:14px;font-family:var(--mono);font-size:11px;color:#9a9a92;letter-spacing:1px}
 
   /* ---- Layout grid ---- */
-  .grid{display:grid;grid-template-columns:340px 1fr;gap:24px;align-items:start}
+  .grid{display:grid;grid-template-columns:360px 1fr;gap:24px;align-items:start}
   .grid>div{min-width:0}
   #plan{
     display:block;max-width:100%;background:#fbfbf8;
-    user-select:none;-webkit-user-select:none;
+    user-select:none;-webkit-user-select:none; /* Zablokowanie zaznaczania tekstu na planie */
   }
   @media(max-width:900px){.grid{grid-template-columns:1fr}}
 
@@ -206,7 +206,7 @@
           <div class="palette" id="palette"></div>
           <div class="editorhint" id="editorhint"></div>
           <div class="preview" style="position:relative">
-            <canvas id="plan" width="900" height="560"></canvas>
+            <canvas id="plan" width="1200" height="720"></canvas>
             <div class="zoomctl" style="position:absolute;right:10px;bottom:10px;display:flex;flex-direction:column;gap:4px">
               <button id="zoomin"  title="Vergrößern"  style="width:30px;height:30px;font-size:18px;line-height:1;border:1px solid var(--line);background:#fff;border-radius:6px;cursor:pointer">+</button>
               <button id="zoomout" title="Verkleinern"  style="width:30px;height:30px;font-size:18px;line-height:1;border:1px solid var(--line);background:#fff;border-radius:6px;cursor:pointer">−</button>
@@ -459,7 +459,7 @@ function trueLength(bname, ptA, ptB) {
   const lxB = ptB[0] * cc - ptB[1] * ss;
   const lyB = ptB[0] * ss + ptB[1] * cc;
   
-  const dyTrue = (lyB - lyA) / cosP; // rozciągamy oś spadu dachu z powrotem do 100%
+  const dyTrue = (lyB - lyA) / cosP; 
   const dxTrue = lxB - lxA;
   
   return Math.hypot(dxTrue, dyTrue);
@@ -595,7 +595,7 @@ function auraForBuilding(b){
     let cells=0;for(let i=0;i<roofR.length;i++)if(roofR[i]&&!rmodR[i]&&!rbarR[i])cells++;
     m2_projected=cells/(res*res);
   }
-  const m2 = m2_projected / cosP;
+  const m2 = m2_projected / cosP; // Prawdziwa pow. w m2 z kompensacją nachylenia
 
   const STEP=0.02, EDGE=0.12, SNAP=0.08, LAP=0.10;
   let plates=0, fug=0; const byWidth={1380:0,1940:0,2770:0,cut:0}; const cutWidths=[];
@@ -614,6 +614,7 @@ function auraForBuilding(b){
     for(const y of ysR){ if(!onRoof(x,y)||isMod(x,y)) return false; }
     if(isBar(x,yb+PH/2)) return false;
     
+    // Blokada odległości od kalenicy (First) - 300 mm rzeczywistej przestrzeni
     if(firstEdges.length){
       const pt = inv([x, yb + PH]);
       for(const [fa, fb] of firstEdges){
@@ -707,6 +708,7 @@ function auraFromUser(b){
     let kind;
     if(std){ const k=std===2.77?2770:std===1.94?1940:1380; byWidth[k]++; kind=String(k); }
     else { byWidth.cut++; cutWidths.push(wmm); kind='cut'; }
+    // Kompensacja m2
     m2 += p.w * (p.h / cosP);
     plateRects.push({verts:[[p.x,p.y],[p.x+p.w,p.y],[p.x+p.w,p.y+p.h],[p.x,p.y+p.h]].map(inv), w:wmm, kind});
   });
@@ -1100,7 +1102,7 @@ const A=()=>window.__SUN,St=()=>window.__SUN.S,ET=()=>window.__SUN.EDGE_TYPES;
 const visibleBuilding=bn=>St().activeBuilding==='ALL'||St().activeBuilding===bn;
 const visiblePoly=v=>St().activeBuilding==='ALL'||A().nearestBuilding(A().centroid(v))===St().activeBuilding;
 
-let VIEW={x0:0,y0:0,scale:1,baseScale:1,zoom:1,panx:0,pany:0,W:900,H:560,pad:24}; 
+let VIEW={x0:0,y0:0,scale:1,baseScale:1,zoom:1,panx:0,pany:0,W:1200,H:720,pad:24}; 
 let zonePoints=[];
 let zoneMouse=null;
 let drawStart=null; 
@@ -1254,19 +1256,28 @@ function buildPalette(){
   const draw=el('button','edgebtn'+(S.activeTool==='__draw'?' on':''),'✎ Freihand');
   draw.onclick=()=>{const leavingAura=S.activeTool==='__aura';S.activeTool=(S.activeTool==='__draw'?null:'__draw');drawStart=null;window.drawMouse=null;zonePoints=[];if(leavingAura)setEditorExpanded(false);buildPalette();drawPlan();};
   box.appendChild(draw);
+
+  const aurB = el('button', 'edgebtn' + (S.activeTool === '__aurabox' ? ' on' : ''), '▧ Aura-Box');
+  aurB.style.setProperty('--c', '#d98a1f');
+  aurB.title = "Klicken und ziehen, um einen Bereich mit Aura zu füllen";
+  aurB.onclick = () => {
+    const leaving = S.activeTool === '__aurabox';
+    S.activeTool = (leaving ? null : '__aurabox');
+    S.auraSel = null; window.rectStart = null; window.rectCurrent = null; zonePoints = [];
+    if (leaving) setEditorExpanded(false);
+    buildPalette(); drawPlan();
+  };
+  box.appendChild(aurB);
   
-  const aurZ = el('button', 'edgebtn' + (S.activeTool === '__aurazone' ? ' on' : ''), '▧ Aura-Feld zeichnen');
+  const aurZ = el('button', 'edgebtn' + (S.activeTool === '__aurazone' ? ' on' : ''), '▰ Aura-Poly');
   aurZ.style.setProperty('--c', '#d98a1f');
+  aurZ.title = "Punkte klicken, um ein Polygon-Feld zu zeichnen (Enter zum Ausfüllen)";
   aurZ.onclick = () => {
     const leaving = S.activeTool === '__aurazone';
     S.activeTool = (leaving ? null : '__aurazone');
-    S.auraSel = null;
-    drawStart = null;
-    window.drawMouse = null;
-    zonePoints = [];
+    S.auraSel = null; drawStart = null; window.drawMouse = null; zonePoints = [];
     if (leaving) setEditorExpanded(false);
-    buildPalette();
-    drawPlan();
+    buildPalette(); drawPlan();
   };
   box.appendChild(aurZ);
 
@@ -1344,17 +1355,18 @@ function buildPalette(){
     ? 'Freihand: Startpunkt klicken, dann Endpunkt. Shift=Ortho. Wird als '+(ET()[S.drawType]||{label:''}).label+' gezählt.'
     : (S.activeTool==='__aura' ? 'Ziehen = Auswahlbox · Platte ziehen = verschieben · Kante ziehen = Grösse · Alt hält Snap aus · Entf = Auswahl löschen'+(S.auraMessage?' · '+S.auraMessage:'')
     : (S.activeTool==='Schneefang' ? 'Klicke Kanten an, um Schneefang zu setzen (zusätzlich zu Traufe möglich). Manuelle Markierung ersetzt die automatische Schneefang-Erkennung.'
-    : (S.activeTool==='__aurazone' ? 'Aura-Feld: Klicke Punkte (Shift=Ortho), um ein Polygon zu zeichnen. Klicke nahe Startpunkt oder drücke ENTER zum Füllen.'
-    : (S.activeTool ? 'Klicke Kanten an, um sie als '+ET()[S.activeTool].label+' zu markieren.' : 'Wähle oben einen Kanten-Typ, dann klicke Kanten auf dem Plan an.'))));
+    : (S.activeTool==='__aurazone' ? 'Aura-Poly: Klicke Punkte (Shift=Ortho), um ein Polygon zu zeichnen. Klicke nahe Startpunkt oder drücke ENTER zum Füllen.'
+    : (S.activeTool==='__aurabox' ? 'Aura-Box: Klicken und ziehen, um einen Bereich mit Platten zu füllen.'
+    : (S.activeTool ? 'Klicke Kanten an, um sie als '+ET()[S.activeTool].label+' zu markieren.' : 'Wähle oben einen Kanten-Typ, dann klicke Kanten auf dem Plan an.')))));
 }
 
 function buildPills(){const box=$('#pills');box.innerHTML='';const S=St();const all=el('div','pill'+(S.activeBuilding==='ALL'?' on':''),'Alle');all.onclick=()=>{S.activeBuilding='ALL';VIEW.zoom=1;VIEW.panx=0;VIEW.pany=0;renderAll();};box.appendChild(all);const multi=S.projects&&S.projects.length>1;S.buildings.forEach(b=>{const label=multi&&b.projectName?(b.name+' · Dach '+(Number(b.projectId)+1)):b.name;const p=el('div','pill'+(S.activeBuilding===b.name?' on':''),label);if(b.projectName)p.title=b.projectName;p.onclick=()=>{S.activeBuilding=b.name;VIEW.zoom=1;VIEW.panx=0;VIEW.pany=0;renderAll();};box.appendChild(p);});}
 
 function computeView(){
   const S=St(),cv=$('#plan'),host=cv.parentElement,panel=$('#editorpanel');
-  const cw=Math.max(280,Math.floor((host&&host.clientWidth)||cv.clientWidth||900));
+  const cw=Math.max(280,Math.floor((host&&host.clientWidth)||cv.clientWidth||1200));
   const expanded=panel&&panel.classList.contains('expanded');
-  const ch=expanded?Math.max(320,Math.floor(host.clientHeight||window.innerHeight-220)):Math.max(560,Math.min(760,Math.floor(window.innerHeight*.68)));
+  const ch=expanded?Math.max(320,Math.floor(host.clientHeight||window.innerHeight-220)):Math.max(560,Math.min(860,Math.floor(window.innerHeight*.75)));
   VIEW.W=cw;VIEW.H=ch;
   const mods=S.activeBuilding==='ALL'?S.mods:S.buildings.find(b=>b.name===S.activeBuilding).mods;
   const allV=[...mods.map(m=>m.v),...S.carriers.filter(visiblePoly),...S.env.filter(visiblePoly)];
@@ -1388,6 +1400,7 @@ function drawPlan(){
         const u=S.auraUser[bn];
         u.plates.forEach(p=>{
           const v=[[p.x,p.y],[p.x+p.w,p.y],[p.x+p.w,p.y+p.h],[p.x,p.y+p.h]].map(([fx,fy])=>auraF2W(u,fx,fy));
+          // Kolorowanie małych formatek na czerwono (<400mm)
           const isSmall = p.w < 0.40;
           const fillCol = isSmall ? 'rgba(220,50,50,0.8)' : (ac[auraKindByW(p.w)]||'#b4b4b4');
           poly(v,'rgba(90,110,70,.6)', fillCol, 0.4);
@@ -1395,7 +1408,7 @@ function drawPlan(){
       });
     } else if(S.auraRects){
       S.auraRects.filter(r=>visiblePoly(r.verts)).forEach(r=>{
-        const isSmall = r.w < 0.40;
+        const isSmall = r.w < 400; // w mm!
         const fillCol = isSmall ? 'rgba(220,50,50,0.8)' : (ac[r.kind]||'#b4b4b4');
         poly(r.verts, 'rgba(90,110,70,.6)', fillCol, 0.4);
       });
@@ -1452,6 +1465,19 @@ function drawPlan(){
       ctx.stroke();
       ctx.setLineDash([]);
     }
+  }
+
+  // Aura Box Rechteck
+  if (S.activeTool === '__aurabox' && window.rectStart && window.rectCurrent) {
+    const [sx1, sy1] = W2S(window.rectStart[0], window.rectStart[1]);
+    const [sx2, sy2] = W2S(window.rectCurrent[0], window.rectCurrent[1]);
+    ctx.fillStyle = 'rgba(217, 138, 31, 0.2)';
+    ctx.strokeStyle = '#d98a1f';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5,5]);
+    ctx.fillRect(Math.min(sx1,sx2), Math.min(sy1,sy2), Math.abs(sx2-sx1), Math.abs(sy2-sy1));
+    ctx.strokeRect(Math.min(sx1,sx2), Math.min(sy1,sy2), Math.abs(sx2-sx1), Math.abs(sy2-sy1));
+    ctx.setLineDash([]);
   }
 
   // Aura Zone Polygons
@@ -1551,85 +1577,181 @@ function nearestCandidate(sx,sy){
 }
 function ptSeg(px,py,ax,ay,bx,by){const dx=bx-ax,dy=by-ay,l2=dx*dx+dy*dy;let t=l2?((px-ax)*dx+(py-ay)*dy)/l2:0;t=Math.max(0,Math.min(1,t));const cx=ax+t*dx,cy=ay+t*dy;return Math.hypot(px-cx,py-cy);}
 
-function finishAuraZone() {
+const AURA_STD=[1.38,1.94,2.77];
+function auraKindByW(w){const s=AURA_STD.find(v=>Math.abs(w-v)<=0.06);return s?(s===2.77?'2770':s===1.94?'1940':'1380'):'cut';}
+function auraW2F(u,wx,wy){const{cc,ss}=u.frame;return [wx*cc-wy*ss, wx*ss+wy*cc];}
+function auraF2W(u,fx,fy){const{cc,ss}=u.frame;return [fx*cc+fy*ss, -fx*ss+fy*cc];}
+function auraEnsureUser(){
   const S=St();
-  if (zonePoints.length < 3) { zonePoints=[]; zoneMouse=null; drawPlan(); return; }
-  auraEnsureUser();
-  const bn = S.activeBuilding !== 'ALL' ? S.activeBuilding : A().nearestBuilding(zonePoints[0]);
-  if(S.auraUser[bn]) {
-    const u = S.auraUser[bn];
-    const b = S.buildings.find(x => x.name === bn);
-    
-    const polyF = zonePoints.map(pt => auraW2F(u, pt[0], pt[1]));
-    
-    let minY = 1e9, maxY = -1e9, minX = 1e9, maxX = -1e9;
-    polyF.forEach(p => { 
-        minY=Math.min(minY, p[1]); maxY=Math.max(maxY, p[1]); 
-        minX=Math.min(minX, p[0]); maxX=Math.max(maxX, p[0]); 
+  if(!S.auraUser) S.auraUser={};
+  S.buildings.forEach(b=>{
+    if(S.auraUser[b.name]) return;
+    const a=S.result&&S.result.aura&&S.result.aura[b.name];
+    if(a&&a.frame) S.auraUser[b.name]={frame:{cc:a.frame.cc,ss:a.frame.ss}, plates:(a.framePlates||[]).map(p=>({x:p.x,y:p.y,w:p.w,h:p.h}))};
+    else S.auraUser[b.name]={frame:A().buildingFrame(b), plates:[]};
+  });
+}
+function auraRectToFrame(p,from,to){
+  const corners=[[p.x,p.y],[p.x+p.w,p.y],[p.x+p.w,p.y+p.h],[p.x,p.y+p.h]]
+    .map(q=>auraF2W({frame:from},q[0],q[1])).map(q=>auraW2F({frame:to},q[0],q[1]));
+  const xs=corners.map(q=>q[0]),ys=corners.map(q=>q[1]);
+  const x=Math.min(...xs),y=Math.min(...ys);
+  return {x,y,w:Math.max(...xs)-x,h:Math.max(...ys)-y};
+}
+function auraOverlap(a,b){
+  const w=Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x);
+  const h=Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y);
+  if(w<=0||h<=0)return false;
+  return w*h>Math.min(a.w*a.h,b.w*b.h)*.55;
+}
+function auraMergeAuto(){
+  const S=St();auraEnsureUser();
+  const user=S.auraUser;
+  S.auraUser=null;A().compute();
+  const auto=S.result&&S.result.aura?S.result.aura:{};
+  S.auraUser=user;
+  let added=0;
+  S.buildings.filter(b=>visibleBuilding(b.name)).forEach(b=>{
+    const src=auto[b.name];if(!src||!src.frame)return;
+    if(!user[b.name])user[b.name]={frame:A().buildingFrame(b),plates:[]};
+    const u=user[b.name];
+    (src.framePlates||[]).forEach(p=>{
+      const q=auraRectToFrame(p,src.frame,u.frame);
+      if(!u.plates.some(x=>auraOverlap(x,q))){u.plates.push(q);added++;}
     });
-    
-    const cosP = A().getPitchFactor(bn);
-    const pW = 1.38;
-    const pH = 0.78 * cosP;
-    const gap = 0.01;
-    const stepX = pW + gap;
-    const stepY = pH;
-
-    let anchorX = minX;
-    let anchorY = minY;
-    if (b && b.mods && b.mods.length > 0) {
-        let xAnchors = [], yAnchors = [];
-        b.mods.forEach(m => {
-            const modF = m.v.map(pt => auraW2F(u, pt[0], pt[1]));
-            let mnx = 1e9, mny = 1e9;
-            modF.forEach(([x, y]) => { mnx=Math.min(mnx,x); mny=Math.min(mny,y); });
-            xAnchors.push(mnx); yAnchors.push(mny);
-        });
-        xAnchors.sort((a,b)=>a-b);
-        yAnchors.sort((a,b)=>a-b);
-        anchorX = xAnchors[0];
-        anchorY = yAnchors[0];
+  });
+  S.auraMessage=added?('Auto-Layout: '+added+' fehlende Platten ergänzt.'):'Auto-Layout: keine fehlenden Platten gefunden.';
+  A().compute();renderAll();
+  return added;
+}
+function auraHit(sx,sy){
+  const S=St(); if(!S.auraUser) return null;
+  const w=S2W(sx,sy);
+  const tol=6/((VIEW.baseScale||1)*(VIEW.zoom||1));
+  for(const bn of Object.keys(S.auraUser).filter(visibleBuilding)){
+    const u=S.auraUser[bn];
+    const f=auraW2F(u,w[0],w[1]);
+    for(let i=u.plates.length-1;i>=0;i--){
+      const p=u.plates[i];
+      if(f[0]<p.x-tol||f[0]>p.x+p.w+tol||f[1]<p.y-tol||f[1]>p.y+p.h+tol) continue;
+      let edge=null;
+      if(Math.abs(f[0]-p.x)<=tol) edge='w';
+      else if(Math.abs(f[0]-(p.x+p.w))<=tol) edge='e';
+      else if(Math.abs(f[1]-p.y)<=tol) edge='s';
+      else if(Math.abs(f[1]-(p.y+p.h))<=tol) edge='n';
+      const inside=f[0]>=p.x&&f[0]<=p.x+p.w&&f[1]>=p.y&&f[1]<=p.y+p.h;
+      if(!inside && !edge) continue;
+      return {b:bn,i,edge,f};
     }
+  }
+  return null;
+}
+function auraSnapCands(bn){
+  const S=St(); const u=S.auraUser[bn];
+  const b=S.buildings.find(x=>x.name===bn);
+  const xs=[],ys=[];
+  const addBox=verts=>{
+    let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+    verts.forEach(([wx,wy])=>{const[fx,fy]=auraW2F(u,wx,wy);x0=Math.min(x0,fx);y0=Math.min(y0,fy);x1=Math.max(x1,fx);y1=Math.max(y1,fy);});
+    xs.push(x0,x1);ys.push(y0,y1);
+  };
+  (b?b.mods:[]).forEach(m=>addBox(m.v));
+  (S.barred||[]).filter(v=>A().nearestBuilding(A().centroid(v))===bn).forEach(v=>addBox(v)); 
+  u.plates.forEach((p,i)=>{ if(S.auraSel&&S.auraSel.b===bn&&S.auraSel.indices.includes(i))return; xs.push(p.x,p.x+p.w);ys.push(p.y,p.y+p.h); });
+  return {xs,ys};
+}
+function snapTo(v,cands,tol){let best=v,bd=tol;for(const c of cands){const d=Math.abs(c-v);if(d<bd){bd=d;best=c;}}return best;}
+function snapDelta(edges,cands,tol){let delta=0,bd=tol;for(const e of edges)for(const c of cands){const d=c-e;if(Math.abs(d)<bd){bd=Math.abs(d);delta=d;}}return delta;}
 
-    function align(val, anchor, step) {
-        return anchor + Math.floor((val - anchor) / step) * step;
-    }
+// Funkcja współdzielona do wypełniania obszaru (Box lub Polygon)
+function applyAuraFill(bn, minW, maxW, polyF) {
+  auraEnsureUser();
+  const u = S.auraUser[bn];
+  if (!u) return;
+  const b = S.buildings.find(x => x.name === bn);
 
-    let startY = align(minY, anchorY, stepY);
-    
-    for (let py = startY; py + pH <= maxY + 0.1; py += stepY) {
-      const yC = py + pH/2;
-      let xs = [];
-      for(let i=0; i<polyF.length; i++) {
-        const ptA = polyF[i], ptB = polyF[(i+1)%polyF.length];
-        if ((ptA[1] <= yC && ptB[1] > yC) || (ptB[1] <= yC && ptA[1] > yC)) {
-          xs.push(ptA[0] + (yC - ptA[1])/(ptB[1] - ptA[1])*(ptB[0] - ptA[0]));
-        }
-      }
-      xs.sort((a,b)=>a-b);
+  const f1 = auraW2F(u, minW[0], minW[1]);
+  const f2 = auraW2F(u, maxW[0], maxW[1]);
+
+  const minX = Math.min(f1[0], f2[0]);
+  const minY = Math.min(f1[1], f2[1]);
+  const maxX = Math.max(f1[0], f2[0]);
+  const maxY = Math.max(f1[1], f2[1]);
+
+  const cosP = A().getPitchFactor(bn);
+  const pW = 1.38;
+  const gap = 0.01;
+  const stepX = pW + gap; // 1390 mm
+  const pH = 0.78 * cosP;
+  const stepY = pH;
+
+  let anchorX = minX;
+  let anchorY = minY;
+
+  // Dokowanie do siatki modułów PV
+  if (b && b.mods && b.mods.length > 0) {
+    let xAnchors = [], yAnchors = [];
+    b.mods.forEach(m => {
+      const modF = m.v.map(pt => auraW2F(u, pt[0], pt[1]));
+      let mnx = 1e9, mny = 1e9;
+      modF.forEach(([x, y]) => { mnx=Math.min(mnx,x); mny=Math.min(mny,y); });
+      xAnchors.push(mnx); yAnchors.push(mny);
+    });
+    xAnchors.sort((a,b)=>a-b);
+    yAnchors.sort((a,b)=>a-b);
+    anchorX = xAnchors[0];
+    anchorY = yAnchors[0];
+  }
+
+  const align = (val, anchor, step) => anchor + Math.floor((val - anchor) / step) * step;
+  let startX = align(minX, anchorX, stepX);
+  let startY = align(minY, anchorY, stepY);
+
+  for (let py = startY; py < maxY; py += stepY) {
+    let currentH = pH;
+    if (py + pH > maxY + 0.05) currentH = maxY - py;
+    if (currentH < 0.1) continue;
+
+    for (let px = startX; px < maxX; px += stepX) {
+      let currentW = pW;
+      if (px + pW > maxX) currentW = maxX - px;
       
-      for(let i=0; i<xs.length-1; i+=2) {
-        let cx = xs[i], endX = xs[i+1];
-        cx = Math.max(cx, align(cx, anchorX, stepX));
-        
-        while(cx + 0.001 < endX) {
-          let nextGridX = align(cx + 0.001, anchorX, stepX) + stepX;
-          let width = Math.min(nextGridX - cx - gap, endX - cx, pW);
-          
-          if (width > 0.05) { 
-            u.plates.push({x: cx, y: py, w: width, h: pH});
-          }
-          cx += width + gap; 
+      let pX = Math.max(px, minX);
+      let finalW = currentW - (pX - px);
+
+      if (finalW > 0.05) {
+        let center = [pX + finalW/2, py + currentH/2];
+        if (!polyF || pointInPoly(center, polyF)) {
+          u.plates.push({x: pX, y: py, w: finalW, h: currentH});
         }
       }
     }
   }
-  zonePoints = [];
-  zoneMouse = null;
-  S.activeTool = null; 
-  buildPalette();
-  A().compute();
-  renderAll();
+}
+
+function finishAuraZone() {
+  const S=St();
+  if (zonePoints.length < 3) { zonePoints=[]; zoneMouse=null; drawPlan(); return; }
+  const bn = S.activeBuilding !== 'ALL' ? S.activeBuilding : A().nearestBuilding(zonePoints[0]);
+  
+  auraEnsureUser();
+  const u = S.auraUser[bn];
+  if(u) {
+    const polyF = zonePoints.map(pt => auraW2F(u, pt[0], pt[1]));
+    let minX=1e9, minY=1e9, maxX=-1e9, maxY=-1e9;
+    polyF.forEach(p => { 
+        minX=Math.min(minX,p[0]); maxX=Math.max(maxX,p[0]);
+        minY=Math.min(minY,p[1]); maxY=Math.max(maxY,p[1]); 
+    });
+    
+    // Używamy konwertera ramy z powrotem na pozycje świata by użyć applyAuraFill
+    const wMin = auraF2W(u, minX, minY);
+    const wMax = auraF2W(u, maxX, maxY);
+    
+    applyAuraFill(bn, wMin, wMax, polyF);
+  }
+  zonePoints = []; zoneMouse = null; S.activeTool = null; 
+  buildPalette(); A().compute(); renderAll();
 }
 
 function setupCanvas(){
@@ -1653,6 +1775,8 @@ function setupCanvas(){
   cv.addEventListener('mousedown',ev=>{
     ev.preventDefault();
     const S=St();const[x,y]=canvasXY(ev);
+    const w = S2W(x, y);
+
     if(S.activeTool==='__aura'){
       auraEnsureUser();
       const h=auraHit(x,y);
@@ -1669,11 +1793,18 @@ function setupCanvas(){
         return;
       }
       S.auraSel = null;
-      window.auraDrag = { type: 'select', startW: S2W(x, y), endW: S2W(x, y) };
+      window.auraDrag = { type: 'select', startW: w, endW: w };
       buildPalette();drawPlan();
       return;
     }
     
+    if (S.activeTool === '__aurabox') {
+      window.rectStart = w;
+      window.rectCurrent = w;
+      drawPlan();
+      return;
+    }
+
     if(S.activeTool==='__aurazone' || S.activeTool==='__draw') return;
     
     dragging=true;dragMoved=false;lastX=x;lastY=y;
@@ -1682,6 +1813,19 @@ function setupCanvas(){
   window.addEventListener('mouseup',()=>{
     const S = St();
     dragging=false;
+    
+    if (S.activeTool === '__aurabox' && window.rectStart && window.rectCurrent) {
+      const bn = S.activeBuilding !== 'ALL' ? S.activeBuilding : A().nearestBuilding(window.rectStart);
+      
+      const w1 = window.rectStart, w2 = window.rectCurrent;
+      if (Math.abs(w1[0]-w2[0]) > 0.5 && Math.abs(w1[1]-w2[1]) > 0.5) {
+          applyAuraFill(bn, w1, w2, null);
+      }
+      window.rectStart = null; window.rectCurrent = null; S.activeTool = null;
+      buildPalette(); A().compute(); renderAll();
+      return;
+    }
+
     if(window.auraDrag){
       if(window.auraDrag.type === 'select'){
         const [wx1, wy1] = window.auraDrag.startW;
@@ -1715,16 +1859,23 @@ function setupCanvas(){
   
   cv.addEventListener('mousemove',ev=>{
     const S=St();const[sx,sy]=canvasXY(ev);
+    const w = S2W(sx, sy);
+
+    if (S.activeTool === '__aurabox' && window.rectStart) {
+      window.rectCurrent = w;
+      drawPlan();
+      return;
+    }
     
     if (window.auraDrag && window.auraDrag.type === 'select') {
-      window.auraDrag.endW = S2W(sx, sy);
+      window.auraDrag.endW = w;
       drawPlan();
       return;
     }
     
     if(window.auraDrag && window.auraDrag.type === 'move'){
       const u=S.auraUser[window.auraDrag.b];
-      const wpt=S2W(sx,sy);
+      const wpt=w;
       const f=auraW2F(u,wpt[0],wpt[1]);
       const dx=f[0]-window.auraDrag.f0[0], dy=f[1]-window.auraDrag.f0[1];
       const scale=(VIEW.baseScale||1)*(VIEW.zoom||1),T=Math.min(.04,8/scale);
@@ -1762,22 +1913,22 @@ function setupCanvas(){
     }
     
     if (S.activeTool === '__aurazone') {
-       let w = S2W(sx, sy);
-       if (ev.shiftKey && zonePoints.length > 0) w = applyOrtho(zonePoints[zonePoints.length - 1], w);
-       zoneMouse = w;
+       let wPoint = w;
+       if (ev.shiftKey && zonePoints.length > 0) wPoint = applyOrtho(zonePoints[zonePoints.length - 1], wPoint);
+       zoneMouse = wPoint;
        if (zonePoints.length > 0) drawPlan();
     }
     
     if (S.activeTool === '__draw' && drawStart) {
-       let w = S2W(sx, sy);
-       if (ev.shiftKey) w = applyOrtho(drawStart, w);
-       window.drawMouse = w;
+       let wPoint = w;
+       if (ev.shiftKey) wPoint = applyOrtho(drawStart, wPoint);
+       window.drawMouse = wPoint;
        drawPlan();
     }
     
     if(dragging){const dx=sx-lastX,dy=sy-lastY;if(Math.abs(dx)+Math.abs(dy)>2)dragMoved=true;VIEW.panx+=dx;VIEW.pany+=dy;lastX=sx;lastY=sy;drawPlan();cv.style.cursor='grabbing';return;}
     if(!S.activeTool){cv.style.cursor='grab';return;}
-    if(S.activeTool==='__draw' || S.activeTool==='__aurazone'){cv.style.cursor='crosshair';return;}
+    if(S.activeTool==='__draw' || S.activeTool==='__aurazone' || S.activeTool==='__aurabox'){cv.style.cursor='crosshair';return;}
     if(S.activeTool==='__aura'){
       const h=auraHit(sx,sy);
       cv.style.cursor=h?((h.edge==='e'||h.edge==='w')?'ew-resize':(h.edge?'ns-resize':'move')):'grab';
