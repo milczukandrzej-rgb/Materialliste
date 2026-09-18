@@ -69,7 +69,7 @@
   .grid>div{min-width:0}
   #plan{
     display:block;max-width:100%;background:#fbfbf8;
-    user-select:none;-webkit-user-select:none; /* Zablokowanie zaznaczania tekstu na planie */
+    user-select:none;-webkit-user-select:none;
   }
   @media(max-width:900px){.grid{grid-template-columns:1fr}}
 
@@ -466,7 +466,6 @@ function trueLength(bname, ptA, ptB) {
 }
 
 function normalizeScale(resolved,insUnits=null){
-  // Tylko wybrane, bezpieczne warstwy do analizy rozmiarów
   const allowed = ['MODULES','MODULAREA','MODULECARRIERS','AURA','BARREDAREAS','ENVIRONMENT','FIRST','GRAT','KEHLE','ORT','SCHNEEFANG'];
   const filtered = (resolved||[]).filter(e => allowed.includes(canonicalLayer(e.layer).toUpperCase()));
   
@@ -581,11 +580,9 @@ function auraForBuilding(b){
   
   let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;carrR.forEach(v=>v.forEach(([x,y])=>{x0=Math.min(x0,x);y0=Math.min(y0,y);x1=Math.max(x1,x);y1=Math.max(y1,y);}));
   
-  // Kompensacja nachylenia dla DXF z PV*SOL. Rzeczywista wysokość Aury to 780mm. 
-  // Na rzucie 2D skraca się ona do 780mm * cos(pitch).
   const cosP = getPitchFactor(b.name);
   const TRUE_PH = 0.78; 
-  const ROW = TRUE_PH * cosP, PH = TRUE_PH * cosP, MINW = 0.40, GAP = 0.01;
+  const ROW = TRUE_PH * cosP, PH = TRUE_PH * cosP, MINW = 0.05, GAP = 0.01;
   const WIDTHS=[2.77,1.94,1.38];
   
   let rx0=1e9,ry0=1e9,rx1=-1e9,ry1=-1e9;carrR.forEach(v=>v.forEach(([x,y])=>{rx0=Math.min(rx0,x);ry0=Math.min(ry0,y);rx1=Math.max(rx1,x);ry1=Math.max(ry1,y);}));
@@ -598,7 +595,7 @@ function auraForBuilding(b){
     let cells=0;for(let i=0;i<roofR.length;i++)if(roofR[i]&&!rmodR[i]&&!rbarR[i])cells++;
     m2_projected=cells/(res*res);
   }
-  const m2 = m2_projected / cosP; // Obliczamy prawdziwe metry kwadratowe odkompensowując nachylenie
+  const m2 = m2_projected / cosP;
 
   const STEP=0.02, EDGE=0.12, SNAP=0.08, LAP=0.10;
   let plates=0, fug=0; const byWidth={1380:0,1940:0,2770:0,cut:0}; const cutWidths=[];
@@ -608,7 +605,6 @@ function auraForBuilding(b){
   function isMod(x,y){return modR.some(m=>pointInPoly([x,y],m));}
   function isBar(x,y){return barR.some(z=>pointInPoly([x,y],z));}
   
-  // Wyszukaj krawędzie oznaczone jako "First" dla tego dachu, aby zachować 300mm odstępu
   const firstEdges = [];
   S.edgeCands.forEach(e => { if(S.assign[e.id]==='First' && nearestBuilding(e.m)===b.name) firstEdges.push([e.a, e.b]); });
   S.drawnEdges.forEach(e => { if(e.type==='First' && nearestBuilding(mid(e.a,e.b))===b.name) firstEdges.push([e.a, e.b]); });
@@ -618,7 +614,6 @@ function auraForBuilding(b){
     for(const y of ysR){ if(!onRoof(x,y)||isMod(x,y)) return false; }
     if(isBar(x,yb+PH/2)) return false;
     
-    // Blokada odległości od kalenicy (First) - 300 mm rzeczywistej
     if(firstEdges.length){
       const pt = inv([x, yb + PH]);
       for(const [fa, fb] of firstEdges){
@@ -712,7 +707,6 @@ function auraFromUser(b){
     let kind;
     if(std){ const k=std===2.77?2770:std===1.94?1940:1380; byWidth[k]++; kind=String(k); }
     else { byWidth.cut++; cutWidths.push(wmm); kind='cut'; }
-    // m2 kompensowane o spadek
     m2 += p.w * (p.h / cosP);
     plateRects.push({verts:[[p.x,p.y],[p.x+p.w,p.y],[p.x+p.w,p.y+p.h],[p.x,p.y+p.h]].map(inv), w:wmm, kind});
   });
@@ -793,7 +787,6 @@ function edgeLengthsByBuilding(){
   
   function add(a,b,len,type){
     const nm=nearestBuilding(mid(a,b));
-    // Przelicza długość z uwzględnieniem kąta dachu (prawdziwa dł. w metrach)
     const tLen = trueLength(nm, a, b);
     out[nm][type]+=tLen;
     if(type==='First')out[nm].firstLines.push(tLen);
@@ -1225,7 +1218,6 @@ function setEditorExpanded(on){
   setTimeout(()=>{VIEW.zoom=1;VIEW.panx=0;VIEW.pany=0;drawPlan();},0);
 }
 
-// ZASTOSOWANIE FUNKCJI ORTHO
 function applyOrtho(a, b) {
   const bn = A().nearestBuilding(a);
   const bldg = St().buildings.find(x => x.name === bn);
@@ -1403,7 +1395,7 @@ function drawPlan(){
       });
     } else if(S.auraRects){
       S.auraRects.filter(r=>visiblePoly(r.verts)).forEach(r=>{
-        const isSmall = r.w < 400; // w mm!
+        const isSmall = r.w < 0.40;
         const fillCol = isSmall ? 'rgba(220,50,50,0.8)' : (ac[r.kind]||'#b4b4b4');
         poly(r.verts, 'rgba(90,110,70,.6)', fillCol, 0.4);
       });
@@ -1443,7 +1435,6 @@ function drawPlan(){
   
   S.drawnEdges.filter(e=>visiblePoly([e.a,e.b])).forEach(e=>poly([e.a,e.b],ET()[e.type].col,null,3.5));
   
-  // Rysowanie "gumki" dla funkcji Freihand (__draw)
   if(drawStart && S.activeTool === '__draw'){
     const[X,Y]=W2S(drawStart[0],drawStart[1]);
     ctx.beginPath();ctx.arc(X,Y,4,0,7);
@@ -1560,92 +1551,6 @@ function nearestCandidate(sx,sy){
 }
 function ptSeg(px,py,ax,ay,bx,by){const dx=bx-ax,dy=by-ay,l2=dx*dx+dy*dy;let t=l2?((px-ax)*dx+(py-ay)*dy)/l2:0;t=Math.max(0,Math.min(1,t));const cx=ax+t*dx,cy=ay+t*dy;return Math.hypot(px-cx,py-cy);}
 
-const AURA_STD=[1.38,1.94,2.77];
-function auraKindByW(w){const s=AURA_STD.find(v=>Math.abs(w-v)<=0.06);return s?(s===2.77?'2770':s===1.94?'1940':'1380'):'cut';}
-function auraW2F(u,wx,wy){const{cc,ss}=u.frame;return [wx*cc-wy*ss, wx*ss+wy*cc];}
-function auraF2W(u,fx,fy){const{cc,ss}=u.frame;return [fx*cc+fy*ss, -fx*ss+fy*cc];}
-function auraEnsureUser(){
-  const S=St();
-  if(!S.auraUser) S.auraUser={};
-  S.buildings.forEach(b=>{
-    if(S.auraUser[b.name]) return;
-    const a=S.result&&S.result.aura&&S.result.aura[b.name];
-    if(a&&a.frame) S.auraUser[b.name]={frame:{cc:a.frame.cc,ss:a.frame.ss}, plates:(a.framePlates||[]).map(p=>({x:p.x,y:p.y,w:p.w,h:p.h}))};
-    else S.auraUser[b.name]={frame:A().buildingFrame(b), plates:[]};
-  });
-}
-function auraRectToFrame(p,from,to){
-  const corners=[[p.x,p.y],[p.x+p.w,p.y],[p.x+p.w,p.y+p.h],[p.x,p.y+p.h]]
-    .map(q=>auraF2W({frame:from},q[0],q[1])).map(q=>auraW2F({frame:to},q[0],q[1]));
-  const xs=corners.map(q=>q[0]),ys=corners.map(q=>q[1]);
-  const x=Math.min(...xs),y=Math.min(...ys);
-  return {x,y,w:Math.max(...xs)-x,h:Math.max(...ys)-y};
-}
-function auraOverlap(a,b){
-  const w=Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x);
-  const h=Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y);
-  if(w<=0||h<=0)return false;
-  return w*h>Math.min(a.w*a.h,b.w*b.h)*.55;
-}
-function auraMergeAuto(){
-  const S=St();auraEnsureUser();
-  const user=S.auraUser;
-  S.auraUser=null;A().compute();
-  const auto=S.result&&S.result.aura?S.result.aura:{};
-  S.auraUser=user;
-  let added=0;
-  S.buildings.filter(b=>visibleBuilding(b.name)).forEach(b=>{
-    const src=auto[b.name];if(!src||!src.frame)return;
-    if(!user[b.name])user[b.name]={frame:A().buildingFrame(b),plates:[]};
-    const u=user[b.name];
-    (src.framePlates||[]).forEach(p=>{
-      const q=auraRectToFrame(p,src.frame,u.frame);
-      if(!u.plates.some(x=>auraOverlap(x,q))){u.plates.push(q);added++;}
-    });
-  });
-  S.auraMessage=added?('Auto-Layout: '+added+' fehlende Platten ergänzt.'):'Auto-Layout: keine fehlenden Platten gefunden.';
-  A().compute();renderAll();
-  return added;
-}
-function auraHit(sx,sy){
-  const S=St(); if(!S.auraUser) return null;
-  const w=S2W(sx,sy);
-  const tol=6/((VIEW.baseScale||1)*(VIEW.zoom||1));
-  for(const bn of Object.keys(S.auraUser).filter(visibleBuilding)){
-    const u=S.auraUser[bn];
-    const f=auraW2F(u,w[0],w[1]);
-    for(let i=u.plates.length-1;i>=0;i--){
-      const p=u.plates[i];
-      if(f[0]<p.x-tol||f[0]>p.x+p.w+tol||f[1]<p.y-tol||f[1]>p.y+p.h+tol) continue;
-      let edge=null;
-      if(Math.abs(f[0]-p.x)<=tol) edge='w';
-      else if(Math.abs(f[0]-(p.x+p.w))<=tol) edge='e';
-      else if(Math.abs(f[1]-p.y)<=tol) edge='s';
-      else if(Math.abs(f[1]-(p.y+p.h))<=tol) edge='n';
-      const inside=f[0]>=p.x&&f[0]<=p.x+p.w&&f[1]>=p.y&&f[1]<=p.y+p.h;
-      if(!inside && !edge) continue;
-      return {b:bn,i,edge,f};
-    }
-  }
-  return null;
-}
-function auraSnapCands(bn){
-  const S=St(); const u=S.auraUser[bn];
-  const b=S.buildings.find(x=>x.name===bn);
-  const xs=[],ys=[];
-  const addBox=verts=>{
-    let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
-    verts.forEach(([wx,wy])=>{const[fx,fy]=auraW2F(u,wx,wy);x0=Math.min(x0,fx);y0=Math.min(y0,fy);x1=Math.max(x1,fx);y1=Math.max(y1,fy);});
-    xs.push(x0,x1);ys.push(y0,y1);
-  };
-  (b?b.mods:[]).forEach(m=>addBox(m.v));
-  (S.barred||[]).filter(v=>A().nearestBuilding(A().centroid(v))===bn).forEach(v=>addBox(v)); 
-  u.plates.forEach((p,i)=>{ if(S.auraSel&&S.auraSel.b===bn&&S.auraSel.indices.includes(i))return; xs.push(p.x,p.x+p.w);ys.push(p.y,p.y+p.h); });
-  return {xs,ys};
-}
-function snapTo(v,cands,tol){let best=v,bd=tol;for(const c of cands){const d=Math.abs(c-v);if(d<bd){bd=d;best=c;}}return best;}
-function snapDelta(edges,cands,tol){let delta=0,bd=tol;for(const e of edges)for(const c of cands){const d=c-e;if(Math.abs(d)<bd){bd=Math.abs(d);delta=d;}}return delta;}
-
 function finishAuraZone() {
   const S=St();
   if (zonePoints.length < 3) { zonePoints=[]; zoneMouse=null; drawPlan(); return; }
@@ -1653,31 +1558,68 @@ function finishAuraZone() {
   const bn = S.activeBuilding !== 'ALL' ? S.activeBuilding : A().nearestBuilding(zonePoints[0]);
   if(S.auraUser[bn]) {
     const u = S.auraUser[bn];
+    const b = S.buildings.find(x => x.name === bn);
+    
     const polyF = zonePoints.map(pt => auraW2F(u, pt[0], pt[1]));
     
-    let minY = 1e9, maxY = -1e9;
-    polyF.forEach(p => { minY=Math.min(minY, p[1]); maxY=Math.max(maxY, p[1]); });
+    let minY = 1e9, maxY = -1e9, minX = 1e9, maxX = -1e9;
+    polyF.forEach(p => { 
+        minY=Math.min(minY, p[1]); maxY=Math.max(maxY, p[1]); 
+        minX=Math.min(minX, p[0]); maxX=Math.max(maxX, p[0]); 
+    });
     
     const cosP = A().getPitchFactor(bn);
     const pW = 1.38;
     const pH = 0.78 * cosP;
+    const gap = 0.01;
+    const stepX = pW + gap;
+    const stepY = pH;
+
+    let anchorX = minX;
+    let anchorY = minY;
+    if (b && b.mods && b.mods.length > 0) {
+        let xAnchors = [], yAnchors = [];
+        b.mods.forEach(m => {
+            const modF = m.v.map(pt => auraW2F(u, pt[0], pt[1]));
+            let mnx = 1e9, mny = 1e9;
+            modF.forEach(([x, y]) => { mnx=Math.min(mnx,x); mny=Math.min(mny,y); });
+            xAnchors.push(mnx); yAnchors.push(mny);
+        });
+        xAnchors.sort((a,b)=>a-b);
+        yAnchors.sort((a,b)=>a-b);
+        anchorX = xAnchors[0];
+        anchorY = yAnchors[0];
+    }
+
+    function align(val, anchor, step) {
+        return anchor + Math.floor((val - anchor) / step) * step;
+    }
+
+    let startY = align(minY, anchorY, stepY);
     
-    for (let py = minY; py + pH <= maxY + 0.1; py += pH) {
+    for (let py = startY; py + pH <= maxY + 0.1; py += stepY) {
       const yC = py + pH/2;
       let xs = [];
       for(let i=0; i<polyF.length; i++) {
-        const a = polyF[i], b = polyF[(i+1)%polyF.length];
-        if ((a[1] <= yC && b[1] > yC) || (b[1] <= yC && a[1] > yC)) {
-          xs.push(a[0] + (yC - a[1])/(b[1] - a[1])*(b[0] - a[0]));
+        const ptA = polyF[i], ptB = polyF[(i+1)%polyF.length];
+        if ((ptA[1] <= yC && ptB[1] > yC) || (ptB[1] <= yC && ptA[1] > yC)) {
+          xs.push(ptA[0] + (yC - ptA[1])/(ptB[1] - ptA[1])*(ptB[0] - ptA[0]));
         }
       }
       xs.sort((a,b)=>a-b);
+      
       for(let i=0; i<xs.length-1; i+=2) {
         let cx = xs[i], endX = xs[i+1];
+        cx = Math.max(cx, align(cx, anchorX, stepX));
+        
         while(cx + 0.001 < endX) {
-          let width = Math.min(pW, endX - cx);
-          u.plates.push({x: cx, y: py, w: width, h: pH});
-          cx += width;
+          let nextGridX = align(cx + 0.001, anchorX, stepX) + stepX;
+          let width = Math.min(nextGridX - cx - gap, endX - cx, pW);
+          
+          if (width > 0.05) { 
+            u.plates.push({x: cx, y: py, w: width, h: pH});
+          }
+          cx += width + gap; 
         }
       }
     }
@@ -1709,7 +1651,7 @@ function setupCanvas(){
   },{passive:false});
   
   cv.addEventListener('mousedown',ev=>{
-    ev.preventDefault(); // Zablokuj domyślne zachowanie przeglądarki (np. zaznaczanie tekstu)
+    ev.preventDefault();
     const S=St();const[x,y]=canvasXY(ev);
     if(S.activeTool==='__aura'){
       auraEnsureUser();
@@ -1821,9 +1763,7 @@ function setupCanvas(){
     
     if (S.activeTool === '__aurazone') {
        let w = S2W(sx, sy);
-       if (ev.shiftKey && zonePoints.length > 0) {
-         w = applyOrtho(zonePoints[zonePoints.length - 1], w);
-       }
+       if (ev.shiftKey && zonePoints.length > 0) w = applyOrtho(zonePoints[zonePoints.length - 1], w);
        zoneMouse = w;
        if (zonePoints.length > 0) drawPlan();
     }
