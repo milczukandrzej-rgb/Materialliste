@@ -237,7 +237,7 @@
 </div>
 
 <footer>
-  <span>Sunskin Roof Lap Materialrechner · v1.6 · Aura 2 / Zielpunkt</span>
+  <span>Sunskin Roof Lap Materialrechner · v1.7 · Aura 2 / Vorschau</span>
   <span>Vorläufige Materialliste · Dachneigung und Montagevorgaben prüfen · Ungefüllte Randflächen manuell planen</span>
 </footer>
 
@@ -578,16 +578,52 @@ function auraCopySelection(){
  S.auraCopyDX=Math.max(...plates.map(p=>p.x+p.w))-Math.min(...plates.map(p=>p.x))+.01;S.auraCopyDY=0;
  S.auraMessage=plates.length+' Platten kopiert. Versatz X/Y einstellen und einfügen.';buildPalette();drawPlan();
 }
-function auraBeginPaste(){
- if(!S.auraClipboard)return;S.auraPastePending=true;S.activeTool='__aura';
- S.auraMessage='Zielpunkt auf dem Dach anklicken. Kopie rastet im PV-Raster ein. Esc = Abbrechen.';buildPalette();drawPlan();
+function auraCancelPlacement(){S.auraPlacement=null;S.auraGhost=null;S.auraPastePending=false;S.auraMessage='Bearbeiten: Platte anklicken oder Auswahl ziehen.';buildPalette();drawPlan();}
+function auraStartPlacement(kind){
+ auraEnsureUser();const clip=S.auraClipboard;
+ if(kind==='copy'&&!clip)return;
+ S.activeTool='__aura';window.auraDrag=null;S.auraSel=null;
+ S.auraPlacement={kind,b:kind==='copy'?clip.b:null,plates:kind==='copy'?clip.plates.map(p=>({...p})):[{x:0,y:0,w:1.38,h:.78}]};
+ S.auraPastePending=true;S.auraGhost=null;
+ S.auraMessage='Maus bewegen: Vorschau · Klick: einsetzen · Esc / Rechtsklick / Bearbeiten: beenden. Grün = gültig, Rot = Kollision.';
+ buildPalette();drawPlan();
 }
-function auraPlaceCopy(w){
- const clip=S.auraClipboard,u=clip&&S.auraUser[clip.b],b=clip&&S.buildings.find(b=>b.name===clip.b);if(!u||!b)return;
- const f=auraW2F(u,...w),layout=rasterLayout(b),grid=layout.grids.reduce((best,g)=>!best||Math.hypot(g.anchorX-f[0],g.anchorY-f[1])<Math.hypot(best.anchorX-f[0],best.anchorY-f[1])?g:best,null);if(!grid)return;
- const x=grid.anchorX+Math.round((f[0]-grid.anchorX)/grid.stepX)*grid.stepX,y=grid.anchorY+Math.round((f[1]-grid.anchorY)/grid.stepY)*grid.stepY;
- S.auraCopyDX=x-Math.min(...clip.plates.map(p=>p.x));S.auraCopyDY=y-Math.min(...clip.plates.map(p=>p.y));auraPasteSelection();
+function auraBeginPaste(){auraStartPlacement('copy');}
+function auraUpdateGhost(w,free=false){
+ const mode=S.auraPlacement;if(!mode)return;
+ const bn=mode.b||(S.activeBuilding!=='ALL'?S.activeBuilding:nearestBuilding(w)),u=S.auraUser[bn];if(!u)return;
+ const src=mode.plates,minX=Math.min(...src.map(p=>p.x)),minY=Math.min(...src.map(p=>p.y)),width=Math.max(...src.map(p=>p.x+p.w))-minX,height=Math.max(...src.map(p=>p.y+p.h))-minY;
+ const f=auraW2F(u,...w),x=f[0]-width/2,y=f[1]-height/2,T=Math.min(.25,18/((VIEW.baseScale||1)*(VIEW.zoom||1)));
+ const make=(xx,yy)=>src.map(p=>({...p,x:xx+p.x-minX,y:yy+p.y-minY}));
+ const valid=ps=>ps.every(p=>plateGeometryOK(bn,u,p)&&!u.plates.some(q=>auraOverlap(p,q)));
+ let xs=[],ys=[];
+ if(!free&&S.auraSnap!==false){
+ const boxes=u.plates.concat(S.mods.map(m=>{const v=m.v.map(p=>auraW2F(u,...p));const xx=v.map(p=>p[0]),yy=v.map(p=>p[1]);return {x:Math.min(...xx),y:Math.min(...yy),w:Math.max(...xx)-Math.min(...xx),h:Math.max(...yy)-Math.min(...yy)};}));
+ for(const q of boxes){
+ if(q.y+q.h>=y-T&&q.y<=y+height+T)xs.push(q.x,q.x+q.w-width,q.x+q.w+.01,q.x-width-.01);
+ if(q.x+q.w>=x-T&&q.x<=x+width+T)ys.push(q.y,q.y+q.h-height,q.y+q.h,q.y-height);
+ }
+ }
+ const near=(arr,n)=>[...new Set(arr.filter(v=>Math.abs(v-n)<=T))].sort((a,b)=>Math.abs(a-n)-Math.abs(b-n)).slice(0,8);
+ xs=near(xs,x);ys=near(ys,y);const candidates=[];
+ for(const xx of [...xs,x])for(const yy of [...ys,y]){const ps=make(xx,yy);candidates.push({plates:ps,valid:valid(ps),score:Math.hypot(xx-x,yy-y)+(xx===x?T:0)+(yy===y?T:0)});}
+ candidates.sort((a,b)=>Number(b.valid)-Number(a.valid)||a.score-b.score);
+ S.auraGhost={b:bn,...candidates[0]};
 }
+function auraPlaceCopy(w,free=false){
+ auraUpdateGhost(w,free);const g=S.auraGhost;if(!g)return;
+ if(!g.valid){S.auraMessage='Rote Vorschau: Kollision, Mindestmaß oder außerhalb der Montagefläche. Ziel ändern oder Esc zum Bearbeiten.';buildPalette();drawPlan();return;}
+ const u=S.auraUser[g.b],first=u.plates.length;u.plates.push(...g.plates.map(p=>({...p})));S.auraSel={b:g.b,indices:g.plates.map((p,i)=>first+i)};
+ S.auraMessage=g.plates.length+' Platten eingesetzt. Weiter klicken oder Esc zum Bearbeiten.';
+ compute();auraUpdateGhost(w,free);renderAll();
+}
+function auraDrawGhost(ctx){
+ const g=S.auraGhost;if(!g||!S.auraPlacement||S.activeTool!=='__aura')return;const u=S.auraUser[g.b];if(!u)return;
+ ctx.save();ctx.fillStyle=g.valid?'rgba(32,180,100,.38)':'rgba(225,55,55,.35)';ctx.strokeStyle=g.valid?'#078844':'#dc2222';ctx.lineWidth=2;ctx.setLineDash([6,4]);
+ for(const p of g.plates){const v=plateVertices(u,p);ctx.beginPath();v.forEach((q,i)=>{const s=W2S(...q);if(i)ctx.lineTo(...s);else ctx.moveTo(...s);});ctx.closePath();ctx.fill();ctx.stroke();}
+ ctx.restore();
+}
+
 function auraPasteSelection(){
  const clip=S.auraClipboard,u=clip&&S.auraUser&&S.auraUser[clip.b];if(!u)return;
  const dx=Number(S.auraCopyDX),dy=Number(S.auraCopyDY);if(!Number.isFinite(dx)||!Number.isFinite(dy))return;
@@ -597,6 +633,7 @@ function auraPasteSelection(){
  S.auraPastePending=false;S.auraMessage=plates.length+' Platten eingefügt.';compute();renderAll();
 }
 function auraClipboardControls(box){
+ if(S.auraPlacement){const stop=el('button','edgebtn','Bearbeiten / Esc');stop.onclick=auraCancelPlacement;box.appendChild(stop);}
  const count=S.auraSel?S.auraSel.indices.length:0;box.appendChild(el('span',null,count+' ausgewählt'));
  const copy=el('button','edgebtn','Kopieren (Strg+C)');copy.disabled=!count;copy.onclick=auraCopySelection;box.appendChild(copy);
  for(const [key,label] of [['auraCopyDX','Versatz X mm'],['auraCopyDY','Versatz Y mm']]){
@@ -1107,7 +1144,7 @@ function onParsed(resolved){
   S.buildings.forEach((b,i)=>{b.name='H'+(i+1);});
   S.assign={};S.assignSnow={};S.drawnEdges=[];
   
-  S.auraUser=null; S.auraSel=null; S.auraClipboard=null; S.auraPastePending=false; S.auraAnchor=null; S.auraImported=0;
+  S.auraUser=null; S.auraSel=null; S.auraClipboard=null;S.auraPlacement=null;S.auraGhost=null; S.auraPastePending=false; S.auraAnchor=null; S.auraImported=0;
   const auraLay='AURA';
   if(byL[auraLay]){
     const polys=closedLayerPolys(byL[auraLay]);
@@ -1360,6 +1397,7 @@ function applyOrtho(a, b) {
 }
 
 function buildPalette(){
+  if(S.activeTool!=='__aura'){S.auraPlacement=null;S.auraGhost=null;S.auraPastePending=false;}
   const box=$('#palette');box.innerHTML='';
   Object.keys(EDGE_TYPES).forEach(t=>{
     const b=el('button','edgebtn'+(S.activeTool===t?' on':''));
@@ -1398,7 +1436,7 @@ function buildPalette(){
 
   const aur=el('button','edgebtn'+(S.activeTool==='__aura'?' on':''),'⬚ Aura bearbeiten');
   aur.style.setProperty('--c','#5a7d3c');
-  aur.onclick=()=>{const leaving=S.activeTool==='__aura';S.activeTool=(leaving?null:'__aura');S.auraSel=null;drawStart=null;window.drawMouse=null;zonePoints=[];if(leaving)setEditorExpanded(false);buildPalette();drawPlan();};
+  aur.onclick=()=>{if(S.auraPlacement){auraCancelPlacement();S.activeTool='__aura';buildPalette();drawPlan();return;}const leaving=S.activeTool==='__aura';S.activeTool=(leaving?null:'__aura');S.auraSel=null;drawStart=null;window.drawMouse=null;zonePoints=[];if(leaving)setEditorExpanded(false);buildPalette();drawPlan();};
   box.appendChild(aur);
   const wide=el('select');wide.setAttribute('aria-label','Aura Plattenraster');
   [['single','Raster 1,38 m · nicht verbinden'],['wide','Platten bis 2,77 m verbinden']].forEach(([v,label])=>{const o=el('option',null,label);o.value=v;o.selected=(S.auraMergeWide===true?'wide':'single')===v;wide.appendChild(o);});
@@ -1428,19 +1466,7 @@ function buildPalette(){
     snap.onclick=()=>{S.auraSnap=S.auraSnap===false;buildPalette();drawPlan();};
     box.appendChild(snap);
     const add=el('button','edgebtn','+ Platte');
-    add.onclick=()=>{
-      auraEnsureUser();
-      const anchor=S.auraAnchor||null;
-      const bn=anchor?nearestBuilding(anchor):(S.activeBuilding!=='ALL'?S.activeBuilding:nearestBuilding(S2W(VIEW.W/2,VIEW.H/2)));
-      const b=S.buildings.find(x=>x.name===bn);
-      const u=S.auraUser[bn]; if(!u||!b)return;
-      const f=anchor?auraW2F(u,anchor[0],anchor[1]):auraW2F(u,b.cx,b.cy);
-      
-      const cosP = getPitchFactor(bn);
-      u.plates.push({x:Math.round((f[0]-0.69)*100)/100, y:Math.round((f[1]-0.435)*100)/100, w:1.38, h:0.78 * cosP});
-      S.auraSel={b:bn,indices:[u.plates.length-1]};
-      compute();renderAll();
-    };
+    add.onclick=()=>auraStartPlacement('add');
     box.appendChild(add);
     const del=el('button','edgebtn ghost','– Platte löschen');
     del.onclick=()=>{
@@ -1658,6 +1684,7 @@ function drawPlan(){
     ctx.fillStyle = 'rgba(27, 79, 156, 0.2)'; ctx.strokeStyle = 'var(--blue)'; ctx.lineWidth = 1;
     ctx.fillRect(sx1, sy1, sx2-sx1, sy2-sy1); ctx.strokeRect(sx1, sy1, sx2-sx1, sy2-sy1);
   }
+  auraDrawGhost(ctx);
   $('#planmeta').textContent=`${mods.length} Module · ${visibleCarriers.length} Dachflächen`;
 }
 
@@ -1687,6 +1714,8 @@ function finishAuraZone() {
 
 function setupCanvas(){
   const cv=$('#plan');
+  cv.addEventListener('contextmenu',ev=>{if(S.auraPlacement){ev.preventDefault();auraCancelPlacement();}});
+  cv.addEventListener('mouseleave',()=>{S.auraGhost=null;drawPlan();});
   let dragging=false, dragMoved=false, lastX=0, lastY=0;
   
   cv.addEventListener('wheel',ev=>{
@@ -1703,7 +1732,8 @@ function setupCanvas(){
     ev.preventDefault();
     const [x,y]=canvasXY(ev); const w = S2W(x, y);
 
-    if(S.activeTool==='__aura'&&S.auraPastePending){auraPlaceCopy(w);return;}
+    if(ev.button===2){if(S.auraPlacement)auraCancelPlacement();return;}
+    if(S.activeTool==='__aura'&&S.auraPlacement){auraPlaceCopy(w,ev.altKey);return;}
     if(S.activeTool==='__aura'){
       auraEnsureUser();
       let h=null, tol=6/((VIEW.baseScale||1)*(VIEW.zoom||1));
@@ -1738,7 +1768,7 @@ function setupCanvas(){
         };
         (b?b.mods:[]).forEach(m=>addBox(m.v));
         (S.barred||[]).filter(v=>nearestBuilding(centroid(v))===bn).forEach(v=>addBox(v)); 
-        u.plates.forEach((p,i)=>{ if(S.auraSel&&S.auraSel.b===bn&&S.auraSel.indices.includes(i))return; xs.push(p.x,p.x+p.w);ys.push(p.y,p.y+p.h); });
+        u.plates.forEach((p,i)=>{ if(S.auraSel&&S.auraSel.b===bn&&S.auraSel.indices.includes(i))return; xs.push(p.x,p.x+p.w,p.x-.01,p.x+p.w+.01);ys.push(p.y,p.y+p.h); });
 
         window.auraDrag={
           type: 'move', b:h.b, edge:S.auraSel.indices.length===1?h.edge:null, f0:h.f,
@@ -1795,6 +1825,7 @@ function setupCanvas(){
   
   cv.addEventListener('mousemove',ev=>{
     const[sx,sy]=canvasXY(ev); const w = S2W(sx, sy);
+    if(S.activeTool==='__aura'&&S.auraPlacement){auraUpdateGhost(w,ev.altKey);drawPlan();return;}
 
     if (S.activeTool === '__aurabox' && window.rectStart) { window.rectCurrent = w; drawPlan(); return; }
     if (window.auraDrag && window.auraDrag.type === 'select') { window.auraDrag.endW = w; drawPlan(); return; }
@@ -1802,7 +1833,7 @@ function setupCanvas(){
     if(window.auraDrag && window.auraDrag.type === 'move'){
       const u=S.auraUser[window.auraDrag.b], wpt=w, f=auraW2F(u,wpt[0],wpt[1]);
       const dx=f[0]-window.auraDrag.f0[0], dy=f[1]-window.auraDrag.f0[1];
-      const scale=(VIEW.baseScale||1)*(VIEW.zoom||1),T=Math.min(.04,8/scale);
+      const scale=(VIEW.baseScale||1)*(VIEW.zoom||1),T=Math.min(.25,18/scale);
       const doSnap=S.auraSnap!==false&&!ev.altKey;
       const r3=v=>Math.round(v*1000)/1000; const cp=getPitchFactor(window.auraDrag.b);
       const snapTo=(v,cands,tol)=>{let best=v,bd=tol;for(const c of cands){const d=Math.abs(c-v);if(d<bd){bd=d;best=c;}}return best;};
@@ -1813,7 +1844,7 @@ function setupCanvas(){
         if(!window.auraDrag.edge){
           let nx=r3(o.x+dx),ny=r3(o.y+dy);
           if(doSnap && window.auraDrag.origs.length === 1){
-            nx=r3(nx+snapDelta([nx,nx+o.w],window.auraDrag.cands.xs,T)); ny=r3(ny+snapDelta([ny,ny+o.h],window.auraDrag.cands.ys,T));
+            nx=nx+snapDelta([nx,nx+o.w],window.auraDrag.cands.xs,T); ny=ny+snapDelta([ny,ny+o.h],window.auraDrag.cands.ys,T);
           }
           p.x=nx;p.y=ny;
         } else if(window.auraDrag.edge==='e'){
@@ -1937,7 +1968,7 @@ function setupCanvas(){
   
   window.addEventListener('keydown',ev=>{
     if(ev.key==='Escape'){
-      if(S.auraPastePending){S.auraPastePending=false;S.auraMessage='Einfügen abgebrochen.';buildPalette();drawPlan();return;}
+      if(S.auraPlacement){auraCancelPlacement();return;}
       if(S.activeTool==='__draw' && drawStart) { drawStart = null; window.drawMouse = null; drawPlan(); return; }
       if(zonePoints.length > 0) { zonePoints = []; zoneMouse = null; drawPlan(); return; }
       if($('#editorpanel').classList.contains('expanded')){setEditorExpanded(false);buildPalette();return;}
