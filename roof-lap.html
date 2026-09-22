@@ -237,7 +237,7 @@
 </div>
 
 <footer>
-  <span>Sunskin Roof Lap Materialrechner · v1.7 · Aura 2 / Vorschau</span>
+  <span>Sunskin Roof Lap Materialrechner · v1.9 · Aura 2 / Zuschnitt</span>
   <span>Vorläufige Materialliste · Dachneigung und Montagevorgaben prüfen · Ungefüllte Randflächen manuell planen</span>
 </footer>
 
@@ -450,13 +450,13 @@ function rectContained(rect,poly){return polyArea(rect)-clippedArea(rect,poly)<=
 function plateVertices(u,p){return [[p.x,p.y],[p.x+p.w,p.y],[p.x+p.w,p.y+p.h],[p.x,p.y+p.h]].map(q=>auraF2W(u,...q));}
 function plateGeometryOK(bn,u,p){
   const cp=getPitchFactor(bn),height=p.h/cp;
-  if(![p.x,p.y,p.w,p.h,height].every(Number.isFinite)||p.w<.2-1e-6||p.w>2.77+1e-6||height<.4-1e-6||height>.87+1e-6)return false;
+  if(![p.x,p.y,p.w,p.h,height].every(Number.isFinite)||p.w<.2-1e-6||p.w>2.77+1e-6||height<.001-1e-6||height>.87+1e-6)return false;
   const v=plateVertices(u,p),b=S.buildings.find(b=>b.name===bn);
   return S.carriers.some(c=>rectContained(v,c) && !(S.mountingAreas||[]).some(m=>m.roof===c&&!rectContained(v,m.verts))) && !S.mods.some(m=>rectIntersectsPoly(v,m.v)) && !S.barred.some(c=>rectIntersectsPoly(v,c));
 }
 function validateLayout(aura){
-  const errors=[];
-  if((S.barredConflicts||[]).length)errors.push('BARREDAREAS enthält '+S.barredConflicts.reduce((n,x)=>n+x.modules,0)+' PV-Module: Bedeutung der großen Konturen unter Import prüfen.');
+  const errors=[];S.layoutWarnings=[];
+  if((S.barredConflicts||[]).length)S.layoutWarnings.push('BARREDAREAS enthält '+S.barredConflicts.reduce((n,x)=>n+x.modules,0)+' PV-Module: Bedeutung der großen Konturen unter Import prüfen.');
   (S.projects||[]).forEach((p,i)=>{if(p.importInfo&&p.importInfo.uncertain)errors.push('Import '+(i+1)+': Modus und Dachneigung manuell bestätigen; Geometrie nicht eindeutig.');});
   if(S.params.h0>1400&&S.mods.some(m=>m.type==='XL'))errors.push('XL ist über 1400 m nicht zulässig.');
   if(S.params.h0>1400&&S.params.auraGlobal)errors.push('Aura über 1400 m: technische Freigabe erforderlich.');
@@ -465,8 +465,10 @@ function validateLayout(aura){
     const a=aura[b.name],u=S.auraUser&&S.auraUser[b.name] || (a.frame?{frame:a.frame,plates:a.framePlates||[]}:null);
     if(!u)continue;
     u.plates.forEach((p,i)=>{
-      if(!plateGeometryOK(b.name,u,p))errors.push(b.name+' Aura '+(i+1)+': Maße, Dachgrenze oder Kollision prüfen.');
-      if(u.plates.slice(0,i).some(q=>auraOverlap(p,q)))errors.push(b.name+' Aura '+(i+1)+': Überlappung mit anderer Platte.');
+      const height=p.h/getPitchFactor(b.name);
+      if(![p.x,p.y,p.w,p.h,height].every(Number.isFinite)||p.w<.2-1e-6||p.w>2.77+1e-6||height<.001-1e-6||height>.87+1e-6)errors.push(b.name+' Aura '+(i+1)+': Ungültige Abmessungen.');
+      else if(!plateGeometryOK(b.name,u,p))S.layoutWarnings.push(b.name+' Aura '+(i+1)+': Zuschnitt / Dachgrenze / Kollision prüfen; rechteckiges Ausgangsmaß wird gezählt.');
+      if(u.plates.slice(0,i).some(q=>auraOverlap(p,q)))S.layoutWarnings.push(b.name+' Aura '+(i+1)+': Überlappung mit anderer Platte.');
     });
   }
   return errors;
@@ -585,7 +587,7 @@ function auraStartPlacement(kind){
  S.activeTool='__aura';window.auraDrag=null;S.auraSel=null;
  S.auraPlacement={kind,b:kind==='copy'?clip.b:null,plates:kind==='copy'?clip.plates.map(p=>({...p})):[{x:0,y:0,w:1.38,h:.78}]};
  S.auraPastePending=true;S.auraGhost=null;
- S.auraMessage='Maus bewegen: Vorschau · Klick: einsetzen · Esc / Rechtsklick / Bearbeiten: beenden. Grün = gültig, Rot = Kollision.';
+ S.auraMessage='Maus bewegen: Vorschau · Klick: einsetzen · Esc / Rechtsklick / Bearbeiten: beenden. Grün = gültig, Rot = Warnung (Einsetzen möglich).';
  buildPalette();drawPlan();
 }
 function auraBeginPaste(){auraStartPlacement('copy');}
@@ -607,14 +609,14 @@ function auraUpdateGhost(w,free=false){
  const near=(arr,n)=>[...new Set(arr.filter(v=>Math.abs(v-n)<=T))].sort((a,b)=>Math.abs(a-n)-Math.abs(b-n)).slice(0,8);
  xs=near(xs,x);ys=near(ys,y);const candidates=[];
  for(const xx of [...xs,x])for(const yy of [...ys,y]){const ps=make(xx,yy);candidates.push({plates:ps,valid:valid(ps),score:Math.hypot(xx-x,yy-y)+(xx===x?T:0)+(yy===y?T:0)});}
- candidates.sort((a,b)=>Number(b.valid)-Number(a.valid)||a.score-b.score);
+ candidates.sort((a,b)=>a.score-b.score);
  S.auraGhost={b:bn,...candidates[0]};
 }
 function auraPlaceCopy(w,free=false){
  auraUpdateGhost(w,free);const g=S.auraGhost;if(!g)return;
- if(!g.valid){S.auraMessage='Rote Vorschau: Kollision, Mindestmaß oder außerhalb der Montagefläche. Ziel ändern oder Esc zum Bearbeiten.';buildPalette();drawPlan();return;}
+ const warning=!g.valid;
  const u=S.auraUser[g.b],first=u.plates.length;u.plates.push(...g.plates.map(p=>({...p})));S.auraSel={b:g.b,indices:g.plates.map((p,i)=>first+i)};
- S.auraMessage=g.plates.length+' Platten eingesetzt. Weiter klicken oder Esc zum Bearbeiten.';
+ S.auraMessage=g.plates.length+' Platten eingesetzt.'+(warning?' Warnung: Kollision oder außerhalb der Montagefläche.':'')+' Weiter klicken oder Esc zum Bearbeiten.';
  compute();auraUpdateGhost(w,free);renderAll();
 }
 function auraDrawGhost(ctx){
@@ -628,9 +630,9 @@ function auraPasteSelection(){
  const clip=S.auraClipboard,u=clip&&S.auraUser&&S.auraUser[clip.b];if(!u)return;
  const dx=Number(S.auraCopyDX),dy=Number(S.auraCopyDY);if(!Number.isFinite(dx)||!Number.isFinite(dy))return;
  const plates=clip.plates.map(p=>({...p,x:p.x+dx,y:p.y+dy}));
- if(plates.some(p=>!plateGeometryOK(clip.b,u,p)||u.plates.some(q=>auraOverlap(p,q)))){S.auraMessage='Einfügen nicht möglich: Kollision oder außerhalb der Montagefläche. Versatz X/Y ändern.';buildPalette();drawPlan();return;}
+ const warning=plates.some(p=>!plateGeometryOK(clip.b,u,p)||u.plates.some(q=>auraOverlap(p,q)));
  const first=u.plates.length;u.plates.push(...plates);S.auraSel={b:clip.b,indices:plates.map((p,i)=>first+i)};
- S.auraPastePending=false;S.auraMessage=plates.length+' Platten eingefügt.';compute();renderAll();
+ S.auraPastePending=false;S.auraMessage=plates.length+' Platten eingefügt.'+(warning?' Warnung: Kollision oder außerhalb der Montagefläche.':'');compute();renderAll();
 }
 function auraClipboardControls(box){
  if(S.auraPlacement){const stop=el('button','edgebtn','Bearbeiten / Esc');stop.onclick=auraCancelPlacement;box.appendChild(stop);}
@@ -702,7 +704,7 @@ function orderAuraPieces(pieces){
   const order={1380:0,1940:0,2770:0},bins=[],errors=[];let reuse=0;
   // Conservative one-dimensional cutting: no speculative reuse in height.
   const valid=(pieces||[]).filter((p,i)=>{
-    const ok=Number.isFinite(p.w)&&Number.isFinite(p.h)&&p.w>=.2-1e-6&&p.w<=2.77+1e-6&&p.h>=.4-1e-6&&p.h<=.87+1e-6;
+    const ok=Number.isFinite(p.w)&&Number.isFinite(p.h)&&p.w>=.2-1e-6&&p.w<=2.77+1e-6&&p.h>=.001-1e-6&&p.h<=.87+1e-6;
     if(!ok)errors.push('Ungültige Aura-Abmessungen: Detail '+(i+1));return ok;
   }).slice().sort((a,b)=>b.w-a.w);
   for(const p of valid){
@@ -1031,7 +1033,9 @@ function compute(){
   });
   const problems=validateLayout(aura);
   problems.forEach(message=>rows.push({art:message,artNr:'',dim:'',unit:'-',perB:blank(),total:'FEHLER',isError:true}));
-  S.result={rows,buildings:B,edges,aura,errors:problems};return S.result;
+  const warnings=S.layoutWarnings||[];
+  warnings.forEach(message=>rows.push({art:'HINWEIS: '+message,artNr:'',dim:'',unit:'-',perB:blank(),total:'HINWEIS',isWarning:true}));
+  S.result={rows,buildings:B,edges,aura,errors:problems,warnings};return S.result;
 }
 
 function analyzeGrid(b){
@@ -1489,19 +1493,19 @@ function buildPalette(){
         wi.onchange=()=>{p.w=Math.min(2.77, Math.max(.2,(parseFloat(wi.value)||200)/1000));compute();renderAll();};
         box.appendChild(wi);
         box.appendChild(el('span',null,'Höhe mm'));
-        const hi=el('input','auradim');hi.type='number';hi.min=400;hi.max=870;hi.step=1;hi.value=Math.round((p.h/cosP)*1000);
-        hi.onchange=()=>{p.h=Math.min(0.87, Math.max(.4,(parseFloat(hi.value)||400)/1000)) * cosP;compute();renderAll();};
+        const hi=el('input','auradim');hi.type='number';hi.min=1;hi.max=870;hi.step=1;hi.value=Math.round((p.h/cosP)*1000);
+        hi.onchange=()=>{p.h=Math.min(0.87, Math.max(.001,(parseFloat(hi.value)||1)/1000)) * cosP;compute();renderAll();};
         box.appendChild(hi);
       }
     }
   }
-  $('#editorhint').textContent = S.activeTool==='__draw'
+  $('#editorhint').textContent = 'Mittlere Maustaste halten = Ansicht verschieben · '+( S.activeTool==='__draw'
     ? 'Freihand: Startpunkt klicken, dann Endpunkt. Shift=Ortho. Wird als '+(EDGE_TYPES[S.drawType]||{label:''}).label+' gezählt.'
     : (S.activeTool==='__aura' ? 'Shift+Klick = Mehrfachauswahl · Strg+C/V = Kopieren/Einfügen · Versatz X/Y in Plattenachsen · Ziehen = Auswahlbox · Platte ziehen = verschieben · Kante ziehen = Grösse · Alt hält Snap aus · Entf = Auswahl löschen'+(S.auraMessage?' · '+S.auraMessage:'')
     : (S.activeTool==='Schneefang' ? 'Klicke Kanten an, um Schneefang zu setzen (zusätzlich zu Traufe möglich).'
     : (S.activeTool==='__aurazone' ? 'Aura-Poly: Klicke Punkte (Shift=Ortho), um ein Polygon zu zeichnen. Klicke nahe Startpunkt oder drücke ENTER zum Füllen.'
     : (S.activeTool==='__aurabox' ? 'Aura-Box: Klicken und ziehen, um einen Bereich mit Platten zu füllen.'
-    : (S.activeTool ? 'Klicke Kanten an, um sie als '+EDGE_TYPES[S.activeTool].label+' zu markieren.' : 'Wähle oben einen Kanten-Typ, dann klicke Kanten auf dem Plan an.')))));
+    : (S.activeTool ? 'Klicke Kanten an, um sie als '+EDGE_TYPES[S.activeTool].label+' zu markieren.' : 'Wähle oben einen Kanten-Typ, dann klicke Kanten auf dem Plan an.'))))));
 }
 
 function buildPills(){const box=$('#pills');box.innerHTML='';const all=el('div','pill'+(S.activeBuilding==='ALL'?' on':''),'Alle');all.onclick=()=>{S.activeBuilding='ALL';VIEW.zoom=1;VIEW.panx=0;VIEW.pany=0;renderAll();};box.appendChild(all);const multi=S.projects&&S.projects.length>1;S.buildings.forEach(b=>{const label=multi&&b.projectName?(b.name+' · Dach '+(Number(b.projectId)+1)):b.name;const p=el('div','pill'+(S.activeBuilding===b.name?' on':''),label);if(b.projectName)p.title=b.projectName;p.onclick=()=>{S.activeBuilding=b.name;VIEW.zoom=1;VIEW.panx=0;VIEW.pany=0;renderAll();};box.appendChild(p);});}
@@ -1714,9 +1718,11 @@ function finishAuraZone() {
 
 function setupCanvas(){
   const cv=$('#plan');
+  cv.addEventListener('auxclick',ev=>{if(ev.button===1)ev.preventDefault();});
+  window.addEventListener('blur',()=>{middlePan=false;dragging=false;});
   cv.addEventListener('contextmenu',ev=>{if(S.auraPlacement){ev.preventDefault();auraCancelPlacement();}});
   cv.addEventListener('mouseleave',()=>{S.auraGhost=null;drawPlan();});
-  let dragging=false, dragMoved=false, lastX=0, lastY=0;
+  let dragging=false, dragMoved=false, lastX=0, lastY=0, middlePan=false;
   
   cv.addEventListener('wheel',ev=>{
     ev.preventDefault();
@@ -1731,6 +1737,7 @@ function setupCanvas(){
   cv.addEventListener('mousedown',ev=>{
     ev.preventDefault();
     const [x,y]=canvasXY(ev); const w = S2W(x, y);
+    if(ev.button===1){middlePan=true;lastX=x;lastY=y;S.auraGhost=null;cv.style.cursor='grabbing';drawPlan();return;}
 
     if(ev.button===2){if(S.auraPlacement)auraCancelPlacement();return;}
     if(S.activeTool==='__aura'&&S.auraPlacement){auraPlaceCopy(w,ev.altKey);return;}
@@ -1790,6 +1797,7 @@ function setupCanvas(){
   });
   
   window.addEventListener('mouseup',()=>{
+    if(middlePan){middlePan=false;dragMoved=true;cv.style.cursor='default';return;}
     dragging=false;
     
     if (S.activeTool === '__aurabox' && window.rectStart && window.rectCurrent) {
@@ -1825,6 +1833,7 @@ function setupCanvas(){
   
   cv.addEventListener('mousemove',ev=>{
     const[sx,sy]=canvasXY(ev); const w = S2W(sx, sy);
+    if(middlePan){VIEW.panx+=sx-lastX;VIEW.pany+=sy-lastY;lastX=sx;lastY=sy;S.auraGhost=null;drawPlan();cv.style.cursor='grabbing';return;}
     if(S.activeTool==='__aura'&&S.auraPlacement){auraUpdateGhost(w,ev.altKey);drawPlan();return;}
 
     if (S.activeTool === '__aurabox' && window.rectStart) { window.rectCurrent = w; drawPlan(); return; }
@@ -1839,14 +1848,18 @@ function setupCanvas(){
       const snapTo=(v,cands,tol)=>{let best=v,bd=tol;for(const c of cands){const d=Math.abs(c-v);if(d<bd){bd=d;best=c;}}return best;};
       const snapDelta=(edges,cands,tol)=>{let delta=0,bd=tol;for(const e of edges)for(const c of cands){const d=c-e;if(Math.abs(d)<bd){bd=Math.abs(d);delta=d;}}return delta;};
 
+      // Apply a single snapped translation to the whole selection.
+      let groupDX=dx,groupDY=dy;
+      if(doSnap&&!window.auraDrag.edge){
+        const ex=window.auraDrag.origs.flatMap(o=>[o.x+dx,o.x+o.w+dx]);
+        const ey=window.auraDrag.origs.flatMap(o=>[o.y+dy,o.y+o.h+dy]);
+        groupDX+=snapDelta(ex,window.auraDrag.cands.xs,T);
+        groupDY+=snapDelta(ey,window.auraDrag.cands.ys,T);
+      }
       window.auraDrag.origs.forEach(origObj => {
         const p = u.plates[origObj.i], o = origObj;
         if(!window.auraDrag.edge){
-          let nx=r3(o.x+dx),ny=r3(o.y+dy);
-          if(doSnap && window.auraDrag.origs.length === 1){
-            nx=nx+snapDelta([nx,nx+o.w],window.auraDrag.cands.xs,T); ny=ny+snapDelta([ny,ny+o.h],window.auraDrag.cands.ys,T);
-          }
-          p.x=nx;p.y=ny;
+          p.x=o.x+groupDX;p.y=o.y+groupDY;
         } else if(window.auraDrag.edge==='e'){
           const raw=Math.max(.2,o.w+dx),cands=AURA_STD.concat(window.auraDrag.cands.xs.map(x=>x-o.x).filter(x=>x>=.2));
           p.w=Math.min(2.77, r3((doSnap && window.auraDrag.origs.length===1)?snapTo(raw,cands,T):raw));
@@ -1855,11 +1868,11 @@ function setupCanvas(){
           const wN=Math.min(2.77, r3((doSnap && window.auraDrag.origs.length===1)?snapTo(raw,cands,T):raw));
           p.x=r3(right-wN);p.w=wN;
         } else if(window.auraDrag.edge==='n'){
-          const raw=Math.max(.2,o.h+dy),cands=[.4*cp,.43*cp,.78*cp,.87*cp].concat(window.auraDrag.cands.ys.map(y=>y-o.y).filter(y=>y>=.2));
-          p.h=Math.min(.87*cp,Math.max(.4*cp,r3((doSnap && window.auraDrag.origs.length===1)?snapTo(raw,cands,T):raw)));
+          const raw=Math.max(.001*cp,o.h+dy),cands=[.4*cp,.43*cp,.78*cp,.87*cp].concat(window.auraDrag.cands.ys.map(y=>y-o.y).filter(y=>y>=.2));
+          p.h=Math.min(.87*cp,Math.max(.001*cp,r3((doSnap && window.auraDrag.origs.length===1)?snapTo(raw,cands,T):raw)));
         } else if(window.auraDrag.edge==='s'){
-          const top=o.y+o.h,raw=Math.max(.2,o.h-dy),cands=[.4*cp,.43*cp,.78*cp,.87*cp].concat(window.auraDrag.cands.ys.map(y=>top-y).filter(y=>y>=.2));
-          const hN=Math.min(.87*cp,Math.max(.4*cp,r3((doSnap && window.auraDrag.origs.length===1)?snapTo(raw,cands,T):raw)));
+          const top=o.y+o.h,raw=Math.max(.001*cp,o.h-dy),cands=[.4*cp,.43*cp,.78*cp,.87*cp].concat(window.auraDrag.cands.ys.map(y=>top-y).filter(y=>y>=.2));
+          const hN=Math.min(.87*cp,Math.max(.001*cp,r3((doSnap && window.auraDrag.origs.length===1)?snapTo(raw,cands,T):raw)));
           p.y=r3(top-hN);p.h=hN;
         }
       });
@@ -2018,7 +2031,7 @@ function renderTable(){
       if (row.isError) tr.className = 'grouprow errorrow';
       const td=el('td',null,row.group);td.colSpan=ncol;tr.appendChild(td);tb.appendChild(tr);return;
     }
-    const tot=row.isError?'FEHLER':(S.activeBuilding==='ALL'?row.total:(row.perB[S.activeBuilding]||0));
+    const tot=row.isWarning?'HINWEIS':row.isError?'FEHLER':(S.activeBuilding==='ALL'?row.total:(row.perB[S.activeBuilding]||0));
     if(!tot && !/informativ|Restfläche/.test(row.art)) return;
     const tr=el('tr');
     if (row.isError) tr.className = 'errorrow';
@@ -2038,7 +2051,7 @@ function renderNote(){
   const p=S.params,n=$('#assumptions');const warn=p.h0>1400&&p.auraGlobal;n.className='note'+(warn?' warn':'');
   const skipped=Object.values(S.result.aura||{}).reduce((n,a)=>n+(a.skipped||0),0); if(skipped)S.auraMessage=skipped+' automatische Vorschläge wegen Kollision oder Randlage verworfen; Restflächen manuell planen.';
   const assigned=Object.keys(S.assign).length+Object.keys(S.assignSnow||{}).length+S.drawnEdges.length;
-  n.innerHTML=(skipped?'<b>'+skipped+' automatische Platten verworfen: Restflächen manuell planen.</b><br>':'')+(S.result&&S.result.errors&&S.result.errors.length?'<b>Export gesperrt: '+S.result.errors.length+' Planungsfehler. Details in der Materialliste.</b><br>':'')+(warn?'<b>H₀ &gt; 1400 m:</b> Aura 2 nur mit Freigabe TS. ':'')+
+  n.innerHTML=(S.result&&S.result.warnings&&S.result.warnings.length?'<b>'+S.result.warnings.length+' Hinweise zu Zuschnitt / Kollision. Export möglich; rechteckige Ausgangsmaße werden gezählt.</b><br>':'')+(skipped?'<b>'+skipped+' automatische Platten verworfen: Restflächen manuell planen.</b><br>':'')+(S.result&&S.result.errors&&S.result.errors.length?'<b>Export gesperrt: '+S.result.errors.length+' Planungsfehler. Details in der Materialliste.</b><br>':'')+(warn?'<b>H₀ &gt; 1400 m:</b> Aura 2 nur mit Freigabe TS. ':'')+
     `Aura = Restfläche der Dachflächen ins Plattenraster. First beidseitig. `+
     `${assigned} Kanten manuell zugewiesen`+
     (S.preset&&S.preset.length?' · DXF-Layer werden je Kantentyp automatisch genutzt, bis der Typ manuell markiert wird':'')+
