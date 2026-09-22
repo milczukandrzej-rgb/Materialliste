@@ -237,7 +237,7 @@
 </div>
 
 <footer>
-  <span>Sunskin Roof Lap Materialrechner · v1.5 · Aura 2 / Kopieren</span>
+  <span>Sunskin Roof Lap Materialrechner · v1.6 · Aura 2 / Zielpunkt</span>
   <span>Vorläufige Materialliste · Dachneigung und Montagevorgaben prüfen · Ungefüllte Randflächen manuell planen</span>
 </footer>
 
@@ -452,7 +452,7 @@ function plateGeometryOK(bn,u,p){
   const cp=getPitchFactor(bn),height=p.h/cp;
   if(![p.x,p.y,p.w,p.h,height].every(Number.isFinite)||p.w<.2-1e-6||p.w>2.77+1e-6||height<.4-1e-6||height>.87+1e-6)return false;
   const v=plateVertices(u,p),b=S.buildings.find(b=>b.name===bn);
-  return S.carriers.some(c=>rectContained(v,c) && !(S.mountingAreas||[]).some(m=>m.roof===c&&!rectContained(v,m.verts))) && !(b&&b.mods.some(m=>rectIntersectsPoly(v,m.v))) && !S.barred.some(c=>rectIntersectsPoly(v,c));
+  return S.carriers.some(c=>rectContained(v,c) && !(S.mountingAreas||[]).some(m=>m.roof===c&&!rectContained(v,m.verts))) && !S.mods.some(m=>rectIntersectsPoly(v,m.v)) && !S.barred.some(c=>rectIntersectsPoly(v,c));
 }
 function validateLayout(aura){
   const errors=[];
@@ -578,13 +578,23 @@ function auraCopySelection(){
  S.auraCopyDX=Math.max(...plates.map(p=>p.x+p.w))-Math.min(...plates.map(p=>p.x))+.01;S.auraCopyDY=0;
  S.auraMessage=plates.length+' Platten kopiert. Versatz X/Y einstellen und einfügen.';buildPalette();drawPlan();
 }
+function auraBeginPaste(){
+ if(!S.auraClipboard)return;S.auraPastePending=true;S.activeTool='__aura';
+ S.auraMessage='Zielpunkt auf dem Dach anklicken. Kopie rastet im PV-Raster ein. Esc = Abbrechen.';buildPalette();drawPlan();
+}
+function auraPlaceCopy(w){
+ const clip=S.auraClipboard,u=clip&&S.auraUser[clip.b],b=clip&&S.buildings.find(b=>b.name===clip.b);if(!u||!b)return;
+ const f=auraW2F(u,...w),layout=rasterLayout(b),grid=layout.grids.reduce((best,g)=>!best||Math.hypot(g.anchorX-f[0],g.anchorY-f[1])<Math.hypot(best.anchorX-f[0],best.anchorY-f[1])?g:best,null);if(!grid)return;
+ const x=grid.anchorX+Math.round((f[0]-grid.anchorX)/grid.stepX)*grid.stepX,y=grid.anchorY+Math.round((f[1]-grid.anchorY)/grid.stepY)*grid.stepY;
+ S.auraCopyDX=x-Math.min(...clip.plates.map(p=>p.x));S.auraCopyDY=y-Math.min(...clip.plates.map(p=>p.y));auraPasteSelection();
+}
 function auraPasteSelection(){
  const clip=S.auraClipboard,u=clip&&S.auraUser&&S.auraUser[clip.b];if(!u)return;
  const dx=Number(S.auraCopyDX),dy=Number(S.auraCopyDY);if(!Number.isFinite(dx)||!Number.isFinite(dy))return;
  const plates=clip.plates.map(p=>({...p,x:p.x+dx,y:p.y+dy}));
  if(plates.some(p=>!plateGeometryOK(clip.b,u,p)||u.plates.some(q=>auraOverlap(p,q)))){S.auraMessage='Einfügen nicht möglich: Kollision oder außerhalb der Montagefläche. Versatz X/Y ändern.';buildPalette();drawPlan();return;}
  const first=u.plates.length;u.plates.push(...plates);S.auraSel={b:clip.b,indices:plates.map((p,i)=>first+i)};
- S.auraMessage=plates.length+' Platten eingefügt.';compute();renderAll();
+ S.auraPastePending=false;S.auraMessage=plates.length+' Platten eingefügt.';compute();renderAll();
 }
 function auraClipboardControls(box){
  const count=S.auraSel?S.auraSel.indices.length:0;box.appendChild(el('span',null,count+' ausgewählt'));
@@ -592,7 +602,8 @@ function auraClipboardControls(box){
  for(const [key,label] of [['auraCopyDX','Versatz X mm'],['auraCopyDY','Versatz Y mm']]){
  box.appendChild(el('span',null,label));const input=el('input','auradim');input.type='number';input.step=1;input.value=Math.round((S[key]||0)*1000);input.onchange=()=>{S[key]=Number(input.value)/1000;};box.appendChild(input);
  }
- const paste=el('button','edgebtn','Einfügen (Strg+V)');paste.disabled=!S.auraClipboard;paste.onclick=auraPasteSelection;box.appendChild(paste);
+ const offset=el('button','edgebtn','Mit Versatz einfügen');offset.disabled=!S.auraClipboard;offset.onclick=auraPasteSelection;box.appendChild(offset);
+ const paste=el('button','edgebtn','Ziel wählen (Strg+V)');paste.disabled=!S.auraClipboard;paste.onclick=auraBeginPaste;box.appendChild(paste);
 }
 
 function auraEnsureUser(){
@@ -691,6 +702,9 @@ function rasterLayout(b,zone=null){
     let nodes=mods.length?unique(mods.flatMap(m=>[m.x0,m.x1+.01])):[anchorX];
     while(nodes[0]>x0-.01)nodes.unshift(nodes[0]-stepX);
     while(nodes[nodes.length-1]<x1+.01)nodes.push(nodes[nodes.length-1]+stepX);
+    // Extend the module raster through empty gaps, including dormers.
+    const filled=[];for(let i=0;i<nodes.length;i++){filled.push(nodes[i]);if(i+1<nodes.length)for(let x=nodes[i]+stepX;x<nodes[i+1]-.001;x+=stepX){if(filled.length>2000)break;filled.push(x);}}
+    nodes=unique(filled);
     if(nodes.length>2000)continue;
     const rowStart=Math.floor((y0-anchorY)/ROW),rowEnd=Math.ceil((y1-anchorY)/ROW);
     for(let row=rowStart;row<rowEnd&&row-rowStart<2000;row++){
@@ -1066,6 +1080,14 @@ function onParsed(resolved){
   S.roofs = (window.__SPT_ROOFS||[]).map((r,i)=>({verts:r.verts, pitch:r.pitch, ridge:r.ridge, idx:i, pitchUser:null}));
   S.sptSnow = (byL['__SNOWGUARD__']||[]).map(e=>e.verts);
   S.buildings=clusterBuildings(S.mods);
+  // A dormer may separate PV clusters on the same roof; retain one roof frame.
+  for(const roof of S.carriers){
+    const groups=S.buildings.filter(b=>b.mods.length&&b.mods.every(m=>pointInPoly(centroid(m.v),roof)));
+    if(groups.length<2||!groups.every(b=>b.projectId===groups[0].projectId))continue;
+    const merged=groups[0];merged.mods=groups.flatMap(b=>b.mods);merged.modIdx=groups.flatMap(b=>b.modIdx||[]);
+    const centers=merged.mods.map(m=>centroid(m.v));merged.cx=centers.reduce((s,p)=>s+p[0],0)/centers.length;merged.cy=centers.reduce((s,p)=>s+p[1],0)/centers.length;
+    S.buildings=S.buildings.filter(b=>b===merged||!groups.includes(b));
+  }
   
   const pkey=v=>v==null?'legacy':String(v);
   const covered=new Set(S.mods.map(m=>pkey(m.projectId)));
@@ -1085,7 +1107,7 @@ function onParsed(resolved){
   S.buildings.forEach((b,i)=>{b.name='H'+(i+1);});
   S.assign={};S.assignSnow={};S.drawnEdges=[];
   
-  S.auraUser=null; S.auraSel=null; S.auraClipboard=null; S.auraAnchor=null; S.auraImported=0;
+  S.auraUser=null; S.auraSel=null; S.auraClipboard=null; S.auraPastePending=false; S.auraAnchor=null; S.auraImported=0;
   const auraLay='AURA';
   if(byL[auraLay]){
     const polys=closedLayerPolys(byL[auraLay]);
@@ -1681,6 +1703,7 @@ function setupCanvas(){
     ev.preventDefault();
     const [x,y]=canvasXY(ev); const w = S2W(x, y);
 
+    if(S.activeTool==='__aura'&&S.auraPastePending){auraPlaceCopy(w);return;}
     if(S.activeTool==='__aura'){
       auraEnsureUser();
       let h=null, tol=6/((VIEW.baseScale||1)*(VIEW.zoom||1));
@@ -1914,6 +1937,7 @@ function setupCanvas(){
   
   window.addEventListener('keydown',ev=>{
     if(ev.key==='Escape'){
+      if(S.auraPastePending){S.auraPastePending=false;S.auraMessage='Einfügen abgebrochen.';buildPalette();drawPlan();return;}
       if(S.activeTool==='__draw' && drawStart) { drawStart = null; window.drawMouse = null; drawPlan(); return; }
       if(zonePoints.length > 0) { zonePoints = []; zoneMouse = null; drawPlan(); return; }
       if($('#editorpanel').classList.contains('expanded')){setEditorExpanded(false);buildPalette();return;}
@@ -1921,7 +1945,7 @@ function setupCanvas(){
     if(ev.key==='Enter' && S.activeTool==='__aurazone' && zonePoints.length > 2){ finishAuraZone(); return; }
     if(S.activeTool==='__aura'&&!/INPUT|SELECT|TEXTAREA/.test((ev.target&&ev.target.tagName)||'')&&(ev.ctrlKey||ev.metaKey)){
       if(ev.key.toLowerCase()==='c'){ev.preventDefault();auraCopySelection();return;}
-      if(ev.key.toLowerCase()==='v'){ev.preventDefault();auraPasteSelection();return;}
+      if(ev.key.toLowerCase()==='v'){ev.preventDefault();auraBeginPaste();return;}
     }
     if(S.activeTool!=='__aura'||!S.auraSel)return;
     if(ev.key!=='Delete'&&ev.key!=='Backspace')return;
