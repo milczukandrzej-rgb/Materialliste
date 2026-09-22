@@ -237,7 +237,7 @@
 </div>
 
 <footer>
-  <span>Sunskin Roof Lap Materialrechner · v1.3 · Importmodus / PV-Raster</span>
+  <span>Sunskin Roof Lap Materialrechner · v1.5 · Aura 2 / Kopieren</span>
   <span>Vorläufige Materialliste · Dachneigung und Montagevorgaben prüfen · Ungefüllte Randflächen manuell planen</span>
 </footer>
 
@@ -452,10 +452,11 @@ function plateGeometryOK(bn,u,p){
   const cp=getPitchFactor(bn),height=p.h/cp;
   if(![p.x,p.y,p.w,p.h,height].every(Number.isFinite)||p.w<.2-1e-6||p.w>2.77+1e-6||height<.4-1e-6||height>.87+1e-6)return false;
   const v=plateVertices(u,p),b=S.buildings.find(b=>b.name===bn);
-  return S.carriers.some(c=>rectContained(v,c)) && !(b&&b.mods.some(m=>rectIntersectsPoly(v,m.v))) && !S.barred.some(c=>rectIntersectsPoly(v,c));
+  return S.carriers.some(c=>rectContained(v,c) && !(S.mountingAreas||[]).some(m=>m.roof===c&&!rectContained(v,m.verts))) && !(b&&b.mods.some(m=>rectIntersectsPoly(v,m.v))) && !S.barred.some(c=>rectIntersectsPoly(v,c));
 }
 function validateLayout(aura){
   const errors=[];
+  if((S.barredConflicts||[]).length)errors.push('BARREDAREAS enthält '+S.barredConflicts.reduce((n,x)=>n+x.modules,0)+' PV-Module: Bedeutung der großen Konturen unter Import prüfen.');
   (S.projects||[]).forEach((p,i)=>{if(p.importInfo&&p.importInfo.uncertain)errors.push('Import '+(i+1)+': Modus und Dachneigung manuell bestätigen; Geometrie nicht eindeutig.');});
   if(S.params.h0>1400&&S.mods.some(m=>m.type==='XL'))errors.push('XL ist über 1400 m nicht zulässig.');
   if(S.params.h0>1400&&S.params.auraGlobal)errors.push('Aura über 1400 m: technische Freigabe erforderlich.');
@@ -570,6 +571,30 @@ function auraKindByW(w){const s=AURA_STD.find(v=>Math.abs(w-v)<=0.06);return s?(
 function auraW2F(u,wx,wy){const{cc,ss}=u.frame;return [wx*cc-wy*ss, wx*ss+wy*cc];}
 function auraF2W(u,fx,fy){const{cc,ss}=u.frame;return [fx*cc+fy*ss, -fx*ss+fy*cc];}
 
+function auraCopySelection(){
+ const sel=S.auraSel,u=sel&&S.auraUser&&S.auraUser[sel.b];if(!u||!sel.indices.length)return;
+ const plates=sel.indices.map(i=>u.plates[i]).filter(Boolean).map(p=>({...p}));if(!plates.length)return;
+ S.auraClipboard={b:sel.b,plates};
+ S.auraCopyDX=Math.max(...plates.map(p=>p.x+p.w))-Math.min(...plates.map(p=>p.x))+.01;S.auraCopyDY=0;
+ S.auraMessage=plates.length+' Platten kopiert. Versatz X/Y einstellen und einfügen.';buildPalette();drawPlan();
+}
+function auraPasteSelection(){
+ const clip=S.auraClipboard,u=clip&&S.auraUser&&S.auraUser[clip.b];if(!u)return;
+ const dx=Number(S.auraCopyDX),dy=Number(S.auraCopyDY);if(!Number.isFinite(dx)||!Number.isFinite(dy))return;
+ const plates=clip.plates.map(p=>({...p,x:p.x+dx,y:p.y+dy}));
+ if(plates.some(p=>!plateGeometryOK(clip.b,u,p)||u.plates.some(q=>auraOverlap(p,q)))){S.auraMessage='Einfügen nicht möglich: Kollision oder außerhalb der Montagefläche. Versatz X/Y ändern.';buildPalette();drawPlan();return;}
+ const first=u.plates.length;u.plates.push(...plates);S.auraSel={b:clip.b,indices:plates.map((p,i)=>first+i)};
+ S.auraMessage=plates.length+' Platten eingefügt.';compute();renderAll();
+}
+function auraClipboardControls(box){
+ const count=S.auraSel?S.auraSel.indices.length:0;box.appendChild(el('span',null,count+' ausgewählt'));
+ const copy=el('button','edgebtn','Kopieren (Strg+C)');copy.disabled=!count;copy.onclick=auraCopySelection;box.appendChild(copy);
+ for(const [key,label] of [['auraCopyDX','Versatz X mm'],['auraCopyDY','Versatz Y mm']]){
+ box.appendChild(el('span',null,label));const input=el('input','auradim');input.type='number';input.step=1;input.value=Math.round((S[key]||0)*1000);input.onchange=()=>{S[key]=Number(input.value)/1000;};box.appendChild(input);
+ }
+ const paste=el('button','edgebtn','Einfügen (Strg+V)');paste.disabled=!S.auraClipboard;paste.onclick=auraPasteSelection;box.appendChild(paste);
+}
+
 function auraEnsureUser(){
   if(!S.auraUser) S.auraUser={};
   S.buildings.forEach(b=>{
@@ -645,15 +670,22 @@ function orderAuraPieces(pieces){
 function rasterLayout(b,zone=null){
   const frame=buildingFrame(b),u={frame},rot=v=>v.map(p=>auraW2F(u,...p));
   const bounds=v=>({x0:Math.min(...v.map(p=>p[0])),x1:Math.max(...v.map(p=>p[0])),y0:Math.min(...v.map(p=>p[1])),y1:Math.max(...v.map(p=>p[1]))});
-  const roofs=S.carriers.filter(c=>nearestBuilding(centroid(c))===b.name).map(rot);
-  const mods=b.mods.map(m=>bounds(rot(m.v)));
+  const sourceRoofs=S.carriers.filter(c=>nearestBuilding(centroid(c))===b.name).filter(c=>!S.carriers.some(p=>p!==c&&polyArea(p)>polyArea(c)+.01&&c.every(pt=>pointInPoly(pt,p)||p.some(q=>H(pt,q)<.001))));
+  const roofs=sourceRoofs.map(c=>{const mask=(S.mountingAreas||[]).find(m=>m.roof===c);return rot(mask?mask.verts:c);});
+  const allMods=b.mods.map(m=>bounds(rot(m.v)));
+  let mods=allMods;
   const sizes=mods.map(m=>m.x1-m.x0).sort((a,b)=>a-b),stepX=(sizes.length?sizes[Math.floor(sizes.length/2)]:1.38)+.01;
-  const anchorX=mods.length?Math.min(...mods.map(m=>m.x0)):(roofs.length?bounds(roofs[0]).x0:0);
-  const anchorY=mods.length?Math.min(...mods.map(m=>m.y0)):(roofs.length?bounds(roofs[0]).y0:0);
-  const ROW=.78,plates=[];let skipped=0;
+  let anchorX=mods.length?Math.min(...mods.map(m=>m.x0)):(roofs.length?bounds(roofs[0]).x0:0);
+  let anchorY=mods.length?Math.min(...mods.map(m=>m.y0)):(roofs.length?bounds(roofs[0]).y0:0);
+  const ROW=.78,plates=[],grids=[];let skipped=0;
   const unique=xs=>xs.sort((a,b)=>a-b).filter((x,i,a)=>!i||x-a[i-1]>.001);
   for(const roof of roofs){
     const r=bounds(roof),z=zone?bounds(zone):r;
+    const localMods=allMods.filter(m=>pointInPoly([(m.x0+m.x1)/2,(m.y0+m.y1)/2],roof));
+    mods=localMods.length?localMods:allMods;
+    anchorX=mods.length?Math.min(...mods.map(m=>m.x0)):r.x0;
+    anchorY=mods.length?Math.min(...mods.map(m=>m.y0)):r.y0;
+    grids.push({anchorX,anchorY,stepX,stepY:ROW});
     const x0=Math.max(r.x0,z.x0),x1=Math.min(r.x1,z.x1),y0=Math.max(r.y0,z.y0),y1=Math.min(r.y1,z.y1);
     if(x1<=x0||y1<=y0)continue;
     let nodes=mods.length?unique(mods.flatMap(m=>[m.x0,m.x1+.01])):[anchorX];
@@ -670,22 +702,23 @@ function rasterLayout(b,zone=null){
         if(w<.2-1e-6)continue;
         const p={x:left,y:py,w,h:height};
         const local=[[left,py],[right,py],[right,top],[left,top]];
-        if(!rectContained(local,roof)||(zone&&!rectContained(local,zone))||!plateGeometryOK(b.name,u,p)){skipped++;continue;}
+        if(!rectContained(local,roof)||(zone&&!rectContained(local,zone))){skipped++;continue;}
+        if(!plateGeometryOK(b.name,u,p))continue;
         const prev=band[band.length-1];
-        if(prev&&Math.abs(left-prev.x-prev.w-.01)<.001&&right-prev.x<=2.77+1e-6){const merged={...prev,w:right-prev.x};if(plateGeometryOK(b.name,u,merged)){prev.w=merged.w;continue;}}
+        if(S.auraMergeWide===true&&prev&&Math.abs(left-prev.x-prev.w-.01)<.001&&right-prev.x<=2.77+1e-6){const merged={...prev,w:right-prev.x};if(plateGeometryOK(b.name,u,merged)){prev.w=merged.w;continue;}}
         band.push(p);
       }
       band.forEach(p=>{if(!plates.some(q=>auraOverlap(p,q)))plates.push(p);});
     }
   }
-  return {frame,plates,skipped,grid:{anchorX,anchorY,stepX,stepY:ROW}};
+  return {frame,plates,skipped,grid:grids[0]||{anchorX,anchorY,stepX,stepY:ROW},grids};
 }
 function auraForBuilding(b){
   const layout=rasterLayout(b),saved=S.auraUser;
   let result;
   S.auraUser={...(saved||{}),[b.name]:layout};
   try{result=auraFromUser(b);}finally{S.auraUser=saved;}
-  return {...result,user:false,skipped:layout.skipped,grid:layout.grid};
+  return {...result,user:false,skipped:layout.skipped,grid:layout.grid,grids:layout.grids};
 }
 function applyAuraFill(bn,minW,maxW,polyF){
   auraEnsureUser();const u=S.auraUser[bn],b=S.buildings.find(x=>x.name===bn);if(!u||!b)return;
@@ -1052,7 +1085,7 @@ function onParsed(resolved){
   S.buildings.forEach((b,i)=>{b.name='H'+(i+1);});
   S.assign={};S.assignSnow={};S.drawnEdges=[];
   
-  S.auraUser=null; S.auraSel=null; S.auraAnchor=null; S.auraImported=0;
+  S.auraUser=null; S.auraSel=null; S.auraClipboard=null; S.auraAnchor=null; S.auraImported=0;
   const auraLay='AURA';
   if(byL[auraLay]){
     const polys=closedLayerPolys(byL[auraLay]);
@@ -1078,6 +1111,22 @@ function onParsed(resolved){
   return {ok:true};
 }
 
+function interpretBarredAreas(){
+  S.mountingAreas=[];S.barredConflicts=[];
+  const excluded=[];
+  for(const poly of S.barred){
+    const modules=S.mods.filter(m=>pointInPoly(centroid(m.v.slice(0,-1)),poly));
+    if(modules.length<3){excluded.push(poly);continue;}
+    const projectId=modules[0].projectId,pr=S.projects&&S.projects[projectId];
+    const candidates=S.carriers.filter(r=>modules.every(m=>pointInPoly(centroid(m.v.slice(0,-1)),r))).sort((a,b)=>polyArea(a)-polyArea(b));
+    const roof=candidates[0];
+    if(!pr||!roof){excluded.push(poly);continue;}
+    if(pr.barredMode!=='excluded')S.mountingAreas.push({roof,verts:poly,projectId});
+    else{excluded.push(poly);S.barredConflicts.push({projectId,modules:modules.length});}
+  }
+  S.barred=excluded;
+}
+
 function inspectImport(pr){
   const norm=normalizeScale(pr.resolved,pr.insUnits??pr.resolved.insUnits);
   const modules=norm.resolved.filter(e=>canonicalLayer(e.layer)==='MODULES'&&e.verts.length>=4);
@@ -1088,8 +1137,8 @@ function inspectImport(pr){
   const height=median(samples.map(m=>m.height));
   const angularAgreement=samples.length?Math.hypot(samples.reduce((n,m)=>n+Math.cos(2*m.angle),0),samples.reduce((n,m)=>n+Math.sin(2*m.angle),0))/samples.length:0;
   const consistent=height!=null&&samples.every(m=>Math.abs(m.height-height)<.008)&&angularAgreement>.999;
-  const surface=consistent&&Math.abs(height-.78)<.008;
-  const projected=consistent&&height>=.39-.002&&height<.772;
+  const surface=consistent&&Math.abs(height-.78)<.0005;
+  const projected=consistent&&height>=.39-.002&&height<.7795;
   const detected=(pr.sptRoofs||[]).length?'surface':surface?'surface':projected?'projected':'unknown';
   const inferredPitch=projected?Math.acos(Math.min(1,height/.78))*180/Math.PI:null;
   const angle=samples.length?.5*Math.atan2(samples.reduce((n,m)=>n+Math.sin(2*m.angle),0),samples.reduce((n,m)=>n+Math.cos(2*m.angle),0)):0;
@@ -1118,7 +1167,7 @@ function parseProjects(projects){
   const inferred=projects.map(p=>p.importInfo.inferredPitch).filter(Number.isFinite);
   if(inferred.length&&inferred.every(p=>Math.abs(p-inferred[0])<.5))S.params.neigung=inferred[0];
   window.__SPT_AURA=aura;window.__SPT_ROOFS=roofs;
-  return onParsed(comb);
+  const result=onParsed(comb);if(result.ok)interpretBarredAreas();return result;
 }
 function buildImportControls(box){
   (S.projects||[]).forEach((pr,i)=>{
@@ -1135,9 +1184,17 @@ function buildImportControls(box){
     mode.onchange=()=>{pr.importMode=mode.value;refresh();};
     pitch.onchange=()=>{const v=Number(pitch.value);if(Number.isFinite(v)){pr.pitchOverride=Math.max(0,Math.min(60,v));refresh();}};
     reset.onclick=()=>{delete pr.pitchOverride;refresh();};
+    const conflicts=(S.barredConflicts||[]).filter(x=>x.projectId===i);
+    if(conflicts.length||(S.mountingAreas||[]).some(x=>x.projectId===i)){
+      const text=el('div','help');text.textContent='Große BARREDAREAS enthalten vorhandene PV-Module. Kleine Sperrflächen bleiben in beiden Modi gesperrt.';host.appendChild(text);
+      const maskMode=el('select');maskMode.setAttribute('aria-label','BARREDAREAS Import '+(i+1));
+      [['excluded','BARREDAREAS als Sperrflächen'],['mounting','Große PV-Konturen als Montagegrenzen']].forEach(([value,label])=>{const o=el('option',null,label);o.value=value;o.selected=(pr.barredMode||'mounting')===value;maskMode.appendChild(o);});
+      maskMode.onchange=()=>{pr.barredMode=maskMode.value;refresh();};host.appendChild(maskMode);
+    }
     box.appendChild(host);
   });
 }
+
 
 
 window.__SUN={S,EDGE_TYPES,parse:onParsed,parseProjects,compute,nearestBuilding,centroid,polyLen,H,mid,userOverrideTypes,buildingFrame,getPitchFactor,render:function(){}};
@@ -1207,7 +1264,7 @@ function finishParse(resolved,f,info,merge){
 }
 
 function buildParams(){
-  const p=S.params,box=$('#params');box.innerHTML='';
+  const p=S.params,box=$('#params');box.innerHTML='';buildImportControls(box);
   box.appendChild(field('Bezugshöhe H₀','m ü. M.',selNum('h0',[[1000,'≤ 1000 m'],[1200,'≤ 1200 m'],[1400,'≤ 1400 m'],[1600,'≤ 1600 m'],[2000,'≤ 2000 m']],p.h0),p.h0>1400?'Über 1400 m: Aura nur mit Freigabe TS; XL ab 1600 m nicht zulässig.':'Modulhalter, Plattenauflager, Aura-Zulässigkeit.'));
   if(!(S.projects&&S.projects.length)&&S.roofs && S.roofs.length){
     box.appendChild(roofPitchPanel(S.roofs));
@@ -1219,8 +1276,7 @@ function buildParams(){
   box.appendChild(field('First-Dachseiten',null,selNum('firstSeiten',[[2,'2 Seiten (Satteldach)'],[1,'1 Seite (Pult / einseitig)']],p.firstSeiten),'Firstplatten/Anschlussbleche pro Seite. Pultdach = 1.'));
   box.appendChild(tog('auraGlobal','Aura 2-Restfläche füllen',p.auraGlobal,'Restfläche der Dachflächen wird mit Aura-Platten aufgefüllt. Aus bei Fremdeindeckung.'));
   box.appendChild(tog('schneefang','Schneefang rechnen',p.schneefang,'Wird bei erkanntem Schneefang (SPT-Marker / DXF-Layer) automatisch eingeschaltet.'));
-  box.querySelectorAll('select,input').forEach(inp=>inp.addEventListener('change',()=>{const k=inp.dataset.k;if(inp.type==='checkbox')p[k]=inp.checked;else if(inp.type==='number')p[k]=parseFloat(inp.value)||0;else p[k]=isNaN(+inp.value)?inp.value:+inp.value;buildParams();compute();renderAll();}));
-  buildImportControls(box);
+  box.querySelectorAll('select[data-k],input[data-k]').forEach(inp=>inp.addEventListener('change',()=>{const k=inp.dataset.k;if(inp.type==='checkbox')p[k]=inp.checked;else if(inp.type==='number')p[k]=parseFloat(inp.value)||0;else p[k]=isNaN(+inp.value)?inp.value:+inp.value;buildParams();compute();renderAll();}));
 }
 
 function field(l,m,c,h){const f=el('div','field');f.appendChild(el('label','lab',l+(m?` <span class="meta">${m}</span>`:'')));f.appendChild(c);if(h)f.appendChild(el('div','help',h));return f;}
@@ -1322,6 +1378,9 @@ function buildPalette(){
   aur.style.setProperty('--c','#5a7d3c');
   aur.onclick=()=>{const leaving=S.activeTool==='__aura';S.activeTool=(leaving?null:'__aura');S.auraSel=null;drawStart=null;window.drawMouse=null;zonePoints=[];if(leaving)setEditorExpanded(false);buildPalette();drawPlan();};
   box.appendChild(aur);
+  const wide=el('select');wide.setAttribute('aria-label','Aura Plattenraster');
+  [['single','Raster 1,38 m · nicht verbinden'],['wide','Platten bis 2,77 m verbinden']].forEach(([v,label])=>{const o=el('option',null,label);o.value=v;o.selected=(S.auraMergeWide===true?'wide':'single')===v;wide.appendChild(o);});
+  wide.onchange=()=>{S.auraMergeWide=wide.value==='wide';compute();renderAll();};box.appendChild(wide);
 
   const clr=el('button','edgebtn ghost','✕ Auswahl löschen');
   clr.onclick=()=>{S.assign={};S.assignSnow={};S.drawnEdges=[];S.activeTool=null;drawStart=null;window.drawMouse=null;zonePoints=[];window.rectStart=null;window.rectCurrent=null;setEditorExpanded(false);buildPalette();compute();renderAll();};
@@ -1336,6 +1395,7 @@ function buildPalette(){
   }
 
   if(S.activeTool==='__aura'){
+    auraClipboardControls(box);
     const panel=$('#editorpanel');
     const full=el('button','edgebtn ghost',panel&&panel.classList.contains('expanded')?'Vollbild schliessen':'⛶ Vollbild');
     full.onclick=()=>{setEditorExpanded(!(panel&&panel.classList.contains('expanded')));buildPalette();};
@@ -1389,7 +1449,7 @@ function buildPalette(){
   }
   $('#editorhint').textContent = S.activeTool==='__draw'
     ? 'Freihand: Startpunkt klicken, dann Endpunkt. Shift=Ortho. Wird als '+(EDGE_TYPES[S.drawType]||{label:''}).label+' gezählt.'
-    : (S.activeTool==='__aura' ? 'Ziehen = Auswahlbox · Platte ziehen = verschieben · Kante ziehen = Grösse · Alt hält Snap aus · Entf = Auswahl löschen'+(S.auraMessage?' · '+S.auraMessage:'')
+    : (S.activeTool==='__aura' ? 'Shift+Klick = Mehrfachauswahl · Strg+C/V = Kopieren/Einfügen · Versatz X/Y in Plattenachsen · Ziehen = Auswahlbox · Platte ziehen = verschieben · Kante ziehen = Grösse · Alt hält Snap aus · Entf = Auswahl löschen'+(S.auraMessage?' · '+S.auraMessage:'')
     : (S.activeTool==='Schneefang' ? 'Klicke Kanten an, um Schneefang zu setzen (zusätzlich zu Traufe möglich).'
     : (S.activeTool==='__aurazone' ? 'Aura-Poly: Klicke Punkte (Shift=Ortho), um ein Polygon zu zeichnen. Klicke nahe Startpunkt oder drücke ENTER zum Füllen.'
     : (S.activeTool==='__aurabox' ? 'Aura-Box: Klicken und ziehen, um einen Bereich mit Platten zu füllen.'
@@ -1640,6 +1700,11 @@ function setupCanvas(){
       }
 
       if(h){
+        if(ev.shiftKey){
+          if(!S.auraSel||S.auraSel.b!==h.b)S.auraSel={b:h.b,indices:[]};
+          const n=S.auraSel.indices.indexOf(h.i);if(n>=0)S.auraSel.indices.splice(n,1);else S.auraSel.indices.push(h.i);
+          window.auraDrag=null;buildPalette();drawPlan();return;
+        }
         if (!S.auraSel || S.auraSel.b !== h.b || !S.auraSel.indices.includes(h.i)) S.auraSel={b:h.b, indices:[h.i]};
         const bn=h.b, u=S.auraUser[bn], b=S.buildings.find(x=>x.name===bn);
         const xs=[],ys=[];
@@ -1653,7 +1718,7 @@ function setupCanvas(){
         u.plates.forEach((p,i)=>{ if(S.auraSel&&S.auraSel.b===bn&&S.auraSel.indices.includes(i))return; xs.push(p.x,p.x+p.w);ys.push(p.y,p.y+p.h); });
 
         window.auraDrag={
-          type: 'move', b:h.b, edge:h.edge, f0:h.f,
+          type: 'move', b:h.b, edge:S.auraSel.indices.length===1?h.edge:null, f0:h.f,
           origs: S.auraSel.indices.map(idx => ({i: idx, ...S.auraUser[h.b].plates[idx]})),
           cands: {xs, ys}
         };
@@ -1854,6 +1919,10 @@ function setupCanvas(){
       if($('#editorpanel').classList.contains('expanded')){setEditorExpanded(false);buildPalette();return;}
     }
     if(ev.key==='Enter' && S.activeTool==='__aurazone' && zonePoints.length > 2){ finishAuraZone(); return; }
+    if(S.activeTool==='__aura'&&!/INPUT|SELECT|TEXTAREA/.test((ev.target&&ev.target.tagName)||'')&&(ev.ctrlKey||ev.metaKey)){
+      if(ev.key.toLowerCase()==='c'){ev.preventDefault();auraCopySelection();return;}
+      if(ev.key.toLowerCase()==='v'){ev.preventDefault();auraPasteSelection();return;}
+    }
     if(S.activeTool!=='__aura'||!S.auraSel)return;
     if(ev.key!=='Delete'&&ev.key!=='Backspace')return;
     if(/INPUT|SELECT|TEXTAREA/.test((ev.target&&ev.target.tagName)||''))return;
